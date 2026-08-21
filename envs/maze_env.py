@@ -5,8 +5,28 @@ from .maze_generator import MazeGenerator
 
 
 class AntMazeEnv(gym.Env):
-    """Phase 1: Single-agent foraging environment with oscillation prevention."""
+    """
+    Phase 1: Single-agent foraging environment.
+
+    Reward structure
+    ----------------
+    - Step penalty          : -0.01 per step (time pressure)
+    - Wall collision        : -0.10 (discourage bumping)
+    - Distance shaping      : ±0.15 × Δ(Manhattan dist to food)
+    - Revisitation penalty  : -0.05 per extra visit, CAPPED at 5 visits
+                              (prevents the unbounded penalty explosion that
+                               causes the agent to freeze rather than explore)
+    - Food reward           : +10.0 on success (terminal)
+    """
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4}
+
+    # Maximum extra-visit penalty per step (5 visits × 0.05 = 0.25 max)
+    REVISIT_PENALTY   = 0.05
+    REVISIT_CAP       = 5      # stop counting after this many extra visits
+    WALL_PENALTY      = 0.10
+    STEP_PENALTY      = 0.01
+    DISTANCE_WEIGHT   = 0.15
+    FOOD_REWARD       = 10.0
 
     def __init__(self, width=11, height=11, obs_window=3, min_food_dist=3):
         super().__init__()
@@ -85,29 +105,38 @@ class AntMazeEnv(gym.Env):
 
         nx, ny = self.agent_pos[0] + dx, self.agent_pos[1] + dy
 
-        # Wall collision check
-        if self.grid[nx, ny] == 1:
-            reward -= 0.1
+        # Wall / boundary collision check
+        hit_wall = (
+            not (0 <= nx < self.width and 0 <= ny < self.height)
+            or self.grid[nx, ny] == 1
+        )
+        if hit_wall:
+            reward -= self.WALL_PENALTY
         else:
             self.agent_pos = [nx, ny]
 
         new_dist = abs(self.agent_pos[0] - self.food_pos[0]) + abs(self.agent_pos[1] - self.food_pos[1])
 
-        # 1. Distance shaping: reward moving closer, penalize moving away
-        reward += (old_dist - new_dist) * 0.15
+        # 1. Distance shaping: reward moving closer, penalise moving away
+        reward += (old_dist - new_dist) * self.DISTANCE_WEIGHT
 
-        # 2. Revisitation penalty: prevents back-and-forth oscillation in local loops
+        # 2. Revisitation penalty — CAPPED to prevent reward explosion.
+        #    Old bug: penalty grew as 0.03 × visit_count, causing −300 rewards
+        #    at step 147 and teaching the agent to freeze.
+        #    Fix: flat penalty per extra visit, capped at REVISIT_CAP visits.
         pos_tuple = tuple(self.agent_pos)
         self.visited_counts[pos_tuple] = self.visited_counts.get(pos_tuple, 0) + 1
-        if self.visited_counts[pos_tuple] > 1:
-            reward -= 0.03 * (self.visited_counts[pos_tuple] - 1)
+        extra_visits = min(self.visited_counts[pos_tuple] - 1, self.REVISIT_CAP)
+        if extra_visits > 0:
+            reward -= self.REVISIT_PENALTY * extra_visits
 
-        # Target reached check
+        # Target reached
         if tuple(self.agent_pos) == self.food_pos and not self.has_food:
-            reward += 10.0
+            reward += self.FOOD_REWARD
             terminated = True
 
         if self.step_count >= self.max_steps:
             truncated = True
 
-        return self._get_obs(), reward, terminated, truncated, {}
+        info = {"hit_wall": hit_wall, "step": self.step_count}
+        return self._get_obs(), reward, terminated, truncated, info
