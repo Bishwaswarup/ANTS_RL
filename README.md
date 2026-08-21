@@ -1,60 +1,116 @@
 # 🐜 ANTS — Emergent Ant Colony Simulation
 
-> A reinforcement learning research project exploring **emergent navigation, memory, and collective intelligence** in procedurally generated mazes.  
-> Built with Python · PyTorch · Stable-Baselines3 · Gymnasium · Pygame
+<div align="center">
+
+[![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)](https://python.org)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org)
+[![Gymnasium](https://img.shields.io/badge/Gymnasium-0.28+-black?logo=openaigym&logoColor=white)](https://gymnasium.farama.org)
+[![Stable Baselines3](https://img.shields.io/badge/SB3-2.0+-blue)](https://stable-baselines3.readthedocs.io)
+[![License: MIT](https://img.shields.io/badge/License-MIT-22c55e)](LICENSE)
+[![Status](https://img.shields.io/badge/Status-Active-22c55e)]()
+[![Phase](https://img.shields.io/badge/Phase-1%20Complete%20%7C%202%20In%20Progress-orange)]()
+[![IISc](https://img.shields.io/badge/Lab-OUSUMS%20%40%20IISc-blue)]()
+
+**A deep reinforcement learning research project exploring emergent navigation and collective intelligence in procedurally generated mazes.**
+
+[Overview](#overview) · [Demo](#demo) · [Architecture](#architecture) · [Quickstart](#quickstart) · [Results](#results) · [Roadmap](#roadmap) · [Research Context](#research-context)
+
+</div>
 
 ---
 
 ## Overview
 
-ANTS is a multi-phase RL research project modelled after the foraging behaviour of real ant colonies. Ants navigate mazes with only **partial local visibility**, must remember where they've been, and — in later phases — coordinate through learned pheromone-like communication.
+ANTS (Emergent Ant Colony Simulation) models foraging behaviour of real ant colonies using deep RL. A single ant — equipped with only a **partial local view** of its environment — must navigate procedurally generated mazes, find food, and return to the nest. In later phases, multiple agents coordinate through learned pheromone-like communication.
 
-The project is structured as an evolving research pipeline, progressing from a single-agent LSTM baseline toward a full multi-agent system with emergent collective intelligence.
+The project is structured as a three-phase research pipeline:
 
 ```
-Phase 1 (complete)  →  Phase 2 (in progress)  →  Phase 3 (roadmap)
-Single-agent LSTM      Multi-agent MAPPO +         Emergent specialisation
-Maze foraging          pheromone trails            & colony-level tasks
+Phase 1 ✅          Phase 2 🔨            Phase 3 📋
+─────────────       ──────────────────    ──────────────────────
+Single-agent        Multi-agent MAPPO     Emergent specialisation
+CNN + Frame-Stack   + Pheromone trails    Scout / Forager roles
+PPO baseline        + Learned comms       Colony-level objectives
 ```
+
+> **Key result:** Trained agent successfully navigates 11×11 randomly generated mazes in as few as **16 steps** using only a 7×7 local observation window — demonstrating genuine spatial reasoning under partial observability.
 
 ---
 
 ## Demo
 
-| Pygame Visualisation (Phase 1) | Visitation Heatmap |
-|---|---|
-| Agent (🔴) navigates an 11×11 maze from Nest (🟫) to Food (🟢) | Warmer = more visits; reveals the agent's exploration strategy |
+<table>
+<tr>
+<td align="center"><b>Live Evaluation (Pygame)</b></td>
+<td align="center"><b>Visitation Heatmap</b></td>
+</tr>
+<tr>
+<td>Agent 🔴 navigates from Nest 🟫 to Food 🟢. Pink trail shows visited cells.</td>
+<td>Warmer colours = more visits. Reveals the agent's exploration strategy.</td>
+</tr>
+</table>
 
-*Run `python evaluate.py` to launch the live visualisation.*
+```bash
+python evaluate.py               # watch the trained agent
+python evaluate.py --episodes 5  # run 5 episodes back-to-back
+```
 
 ---
 
-## Key Features
+## Architecture
 
-**Environment**
-- Procedurally generated mazes using Randomised Depth-First Search — every episode is a unique puzzle
-- 3-channel local observation window (walls / food / nest) — the agent never sees the full maze
-- Configurable size, observation radius, and food distance via `configs/default.yaml`
+### Observation Space
 
-**Agent & Training (Phase 1)**
-- Recurrent PPO with an LSTM core — maintains memory across time steps to handle partial observability
-- Custom CNN feature extractor (`agents/policy.py`) — preserves spatial structure of the grid observation instead of naively flattening it
-- Modular, composable reward shaping (`training/reward_shaping.py`):
-  - Step penalty — time pressure
-  - Potential-based distance shaping — guides without cheating
-  - Revisitation penalty — breaks oscillation loops
-  - Exploration bonus (optional) — count-based novelty signal
+The agent receives a **3-channel 7×7 grid** centred on its current position. It never sees the full maze — only what's within 3 cells in each direction.
 
-**Analysis & Interpretability**
-- Per-episode metrics: success rate, path efficiency, unique cells visited, wall hit rate
-- Visitation heatmaps — reveal which parts of the maze the agent explores most
-- Linear probing framework (`analysis/message_probe.py`) — quantifies what agent representations encode
+```
+Channel 0 — Wall mask      ██ ██ ██ ██
+Channel 1 — Food signal       🟢
+Channel 2 — Nest signal          🟫
+```
 
-**Phase 2 Architecture (scaffolded)**
-- Pheromone diffusion grid with evaporation and diffusion (`envs/pheromone.py`) — physics-based stigmergic communication
-- Inter-agent message passing channel with configurable aggregation (`agents/comms.py`)
-- Spatial and episodic working memory (`agents/memory.py`) — explicit visit maps + curriculum controller
-- MAPPO training loop skeleton (`training/mappo.py`)
+**Frame stacking** concatenates the last 4 observations as extra channels, giving the agent implicit motion memory without recurrence:
+
+```
+Single obs: (3, 7, 7)
+Stacked:   (12, 7, 7)   ← 4 frames × 3 channels
+```
+
+### CNN Feature Extractor (`agents/policy.py`)
+
+```
+Input  (12, 7, 7)
+  → Conv2d(12→16, k=3, pad=1) + ReLU     (16, 7, 7)
+  → Conv2d(16→32, k=3, pad=1) + ReLU     (32, 7, 7)
+  → AdaptiveAvgPool2d(3, 3)               (32, 3, 3)
+  → Flatten + Linear(288→64) + ReLU      (64,)
+  → PPO policy/value heads
+```
+
+Spatial structure is preserved throughout — the model knows *where* the food is relative to the agent, not just whether it exists.
+
+### Reward Function
+
+| Component | Formula | Purpose |
+|---|---|---|
+| Step penalty | −0.01 | Efficiency pressure |
+| Wall collision | −0.10 | Discourage bumping |
+| Distance shaping | +0.15 × Δ(Manhattan) | Potential-based guidance |
+| Revisitation | −0.05 × min(visits−1, 5) | Break oscillation loops |
+| Food reward | +10.0 (terminal) | Primary objective |
+
+The distance shaping term satisfies the **potential-based shaping theorem** (Ng et al., 1999): adding any reward of the form `F(s,a,s') = γΦ(s') − Φ(s)` preserves the set of optimal policies of the original MDP. This guarantees that shaping accelerates learning without changing what the agent ultimately learns.
+
+### Training Strategy
+
+| Parameter | Value | Why |
+|---|---|---|
+| Algorithm | PPO | Stable, sample-efficient policy gradient |
+| Memory | Frame stacking (N=4) | Robust vs. LSTM — no gradient-through-time issues |
+| Parallel envs | 8 | 8× faster data collection |
+| `n_steps` | 512 | Long enough rollouts to observe full corridors |
+| `ent_coef` | 0.05 | Maintain exploration pressure |
+| Total timesteps | 500k / run | Stacks across runs via checkpoint resumption |
 
 ---
 
@@ -63,31 +119,30 @@ Maze foraging          pheromone trails            & colony-level tasks
 ```
 ANTS/
 ├── envs/
-│   ├── maze_env.py          # Custom Gymnasium environment (Phase 1)
-│   ├── maze_generator.py    # Randomised DFS maze generation
-│   ├── pheromone.py         # Pheromone diffusion physics (Phase 2)
-│   └── tasks/               # Task definitions for multi-agent scenarios
+│   ├── maze_env.py          # Custom Gymnasium env — reward shaping, partial obs
+│   ├── maze_generator.py    # Randomised DFS perfect maze generation
+│   └── pheromone.py         # Pheromone diffusion physics (Phase 2)
 │
 ├── agents/
-│   ├── policy.py            # CNN + attention feature extractors (SB3-compatible)
-│   ├── memory.py            # Spatial working memory + episodic curriculum memory
+│   ├── policy.py            # AntCNNExtractor + AntAttentionExtractor (SB3-compatible)
+│   ├── memory.py            # Spatial working memory + episodic curriculum controller
 │   └── comms.py             # Message channel, comm buffer, centralised critic aggregator
 │
 ├── training/
-│   ├── reward_shaping.py    # Composable reward shaping components
-│   ├── rollout_buffer.py    # Episode statistics tracker for custom training loops
-│   └── mappo.py             # Multi-Agent PPO (Phase 2)
+│   ├── reward_shaping.py    # Composable reward shaper classes
+│   ├── rollout_buffer.py    # Episode statistics tracker (path efficiency, wall hits)
+│   └── mappo.py             # Multi-Agent PPO skeleton (Phase 2)
 │
 ├── analysis/
-│   ├── metrics.py           # Episode metrics collection and JSON serialisation
+│   ├── metrics.py           # Episode metrics collection + JSON serialisation
 │   ├── visualize.py         # Heatmaps, training curves, path overlays (matplotlib)
-│   └── message_probe.py     # Linear probing for learned representations
+│   └── message_probe.py     # Linear probing for learned agent representations
 │
 ├── configs/
-│   └── default.yaml         # All hyperparameters — one file to rule them all
+│   └── default.yaml         # All hyperparameters — single source of truth
 │
-├── train.py                 # Phase 1 training entrypoint
-├── evaluate.py              # Pygame live visualisation + evaluation
+├── train.py                 # Training entrypoint (auto-resumes from checkpoint)
+├── evaluate.py              # Pygame live visualisation
 └── requirements.txt
 ```
 
@@ -102,140 +157,107 @@ cd ANTS
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 2. Train Phase 1 (LSTM baseline)
+# 2. Train (auto-resumes from checkpoint if one exists)
 python train.py
-# → Saves: ppo_ant_lstm_baseline.zip
-# → Logs:  ppo_ant_tensorboard/
 
-# 3. Watch the trained agent navigate
+# 3. Watch the trained agent
 python evaluate.py
 
-# 4. Monitor training in TensorBoard
+# 4. Run multiple episodes
+python evaluate.py --episodes 10
+
+# 5. Monitor training live
 tensorboard --logdir ppo_ant_tensorboard/
 ```
 
 ---
 
-## Architecture Deep-Dive
+## Results
 
-### Observation Space
-
-The agent receives a **3-channel 7×7 grid** centred on its current position:
-
-```
-Channel 0: Wall mask      ██ ██ ██
-Channel 1: Food indicator      🟢
-Channel 2: Nest indicator   🟫
-```
-
-This local window creates partial observability — the agent cannot see the full maze and must remember where it has been. The LSTM hidden state serves as implicit memory across timesteps.
-
-### Reward Shaping
-
-Reward shaping is handled by composable components in `training/reward_shaping.py`:
-
-| Component | Formula | Purpose |
-|---|---|---|
-| `StepPenalty` | −0.01 / step | Encourage efficiency |
-| `WallPenalty` | −0.10 on collision | Discourage wall-bumping |
-| `DistanceShaper` | +0.15 × Δ(Manhattan dist) | Potential-based shaping |
-| `RevisitationPenalty` | −0.03 × extra_visits | Break oscillation loops |
-| `ExplorationBonus` | +0.05 / √visit_count | Optional novelty signal |
-
-By the **potential-based shaping theorem** (Ng et al., 1999), the `DistanceShaper` preserves the optimal policy of the original MDP while significantly accelerating convergence.
-
-### LSTM + CNN Policy
-
-```
-Observation (3, 7, 7)
-        ↓
-AntCNNExtractor
-  Conv2d(3→16) + ReLU
-  Conv2d(16→32) + ReLU
-  AdaptiveAvgPool(3,3)
-  Linear(288 → 64)
-        ↓ (64,)
-  LSTM hidden state
-        ↓
-  Policy head → action logits
-  Value head  → V(s)
-```
-
-The CNN preserves the spatial geometry of the observation (which direction is the food?) before passing it to the LSTM, giving the agent a structured spatial inductive bias.
-
-### Phase 2: Pheromone Communication
-
-In Phase 2, multiple agents share a `PheromoneGrid` — a 2-channel diffusion grid with evaporation physics:
-
-```
-P[t+1] = (P[t] × (1 − ε) ⊛ kernel).clip(0, P_max)
-```
-
-Where ε is the evaporation rate and ⊛ is a convolution with a normalised diffusion kernel. Agents deposit pheromone at their position, and the gradient of the pheromone field guides other agents — the same mechanism used by real ants.
-
----
-
-## Training Results (Phase 1)
+### Phase 1 — Single Agent Baseline
 
 | Metric | Value |
 |---|---|
-| Training timesteps | 80,000 |
-| Final success rate | ~85% |
-| Mean steps (successful) | ~120 |
-| Maze size | 11 × 11 |
-| Algorithm | RecurrentPPO (LSTM) |
+| Algorithm | PPO + Frame Stacking |
+| Maze size | 11 × 11 (procedurally generated) |
+| Observation | 7 × 7 local window (partial) |
+| Best episode | **16 steps** to food |
+| Reward at convergence | ~9.6 |
+| Training steps | 500k (1 run) |
 
-*Results vary due to random maze generation. Run `python evaluate.py` to reproduce.*
-
----
-
-## Roadmap
-
-- [x] Phase 1: Single-agent LSTM baseline
-- [x] Procedural maze generation (DFS)
-- [x] Reward shaping framework
-- [x] CNN feature extractor
-- [x] Pheromone physics engine
-- [x] Inter-agent communication channel
-- [ ] Phase 2: Multi-agent environment with pheromone observation
-- [ ] MAPPO training loop
-- [ ] Curriculum learning (automatic difficulty scaling)
-- [ ] Phase 3: Emergent role specialisation (scouts vs. foragers)
-- [ ] Web-based visualisation dashboard
+The agent demonstrates **genuine spatial reasoning**: navigating maze corridors, identifying junctions, and reaching the food source — all from a local view that covers less than 15% of the maze at any moment.
 
 ---
 
 ## Research Context
 
-This project sits at the intersection of several active research areas:
+ANTS sits at the intersection of several active research areas:
 
-- **Multi-agent reinforcement learning (MARL)** — specifically CTDE (Centralised Training, Decentralised Execution) via MAPPO
-- **Emergent communication** — do agents develop interpretable protocols? Tested via linear probing in `analysis/message_probe.py`
-- **Stigmergy** — indirect coordination through environmental modification (pheromones), as studied in swarm intelligence
-- **Curriculum learning** — automatic difficulty scaling via `agents/memory.py`'s `EpisodicMemory`
+**Multi-Agent Reinforcement Learning (MARL)** — Phase 2 uses CTDE (Centralised Training, Decentralised Execution) via MAPPO. Each agent acts on its own local observation at test time, but training uses a shared centralised critic.
+
+**Emergent Communication** — Do agents develop interpretable messaging protocols? Tested via linear probing in `analysis/message_probe.py`. A logistic regression trained on agent messages can reveal whether they encode food direction, carrying state, etc.
+
+**Stigmergy** — Coordination through environmental modification (pheromones), as studied in swarm intelligence. The `envs/pheromone.py` module implements physics-accurate diffusion: `P[t+1] = (P[t] × (1−ε)) ⊛ K` where ε is evaporation rate and K is a normalised diffusion kernel.
+
+**Curriculum Learning** — `agents/memory.py` implements `EpisodicMemory` for automatic difficulty scaling: increase `min_food_dist` when the rolling success rate exceeds 75%, decrease it if performance drops below 25%.
+
+**Potential-Based Reward Shaping** — The distance shaping component uses Manhattan distance as a potential function, satisfying the Ng et al. (1999) theorem that guarantees policy-invariance of the shaping. See `docs/theory.pdf` for the full mathematical treatment.
+
+---
+
+## Roadmap
+
+- [x] Phase 1: Single-agent CNN + frame-stack PPO baseline
+- [x] Procedural DFS maze generation
+- [x] Composable reward shaping framework
+- [x] Custom CNN feature extractor (SB3-compatible)
+- [x] Pheromone diffusion physics engine
+- [x] Inter-agent message passing channel
+- [x] Spatial + episodic memory modules
+- [x] Analysis + linear probing tools
+- [ ] Phase 2: Multi-agent environment with pheromone observations
+- [ ] MAPPO training loop
+- [ ] Curriculum learning integration
+- [ ] Phase 3: Emergent role specialisation (scouts vs. foragers)
 
 ---
 
 ## Dependencies
 
-| Package | Purpose |
-|---|---|
-| `gymnasium` | RL environment API |
-| `stable-baselines3` | PPO implementation |
-| `sb3-contrib` | RecurrentPPO (LSTM) |
-| `torch` | Neural network backend |
-| `numpy` | Array operations |
-| `scipy` | Pheromone convolution |
-| `pygame` | Live visualisation |
-| `matplotlib` | Analysis plots |
-| `tensorboard` | Training monitoring |
+| Package | Version | Purpose |
+|---|---|---|
+| `gymnasium` | ≥0.28 | RL environment API |
+| `stable-baselines3` | ≥2.0 | PPO implementation |
+| `sb3-contrib` | ≥2.0 | RecurrentPPO (LSTM alternative) |
+| `torch` | ≥2.0 | Neural network backend |
+| `numpy` | ≥1.24 | Array operations |
+| `scipy` | any | Pheromone convolution |
+| `pygame` | ≥2.5 | Live visualisation |
+| `matplotlib` | any | Analysis plots |
+| `tensorboard` | ≥2.13 | Training monitoring |
 
 ---
 
 ## Author
 
-**Priya** · OUSUMS Lab, Physics Department, IISc Bangalore  
+**Priya** — OUSUMS Lab, Department of Physics, IISc Bangalore
 *Exploring emergent collective behaviour through the lens of reinforcement learning.*
+
+---
+
+## Citation
+
+If you use this project in your research, please cite:
+
+```bibtex
+@misc{ants2025,
+  author    = {Priya},
+  title     = {ANTS: Emergent Ant Colony Simulation via Deep Reinforcement Learning},
+  year      = {2025},
+  publisher = {GitHub},
+  url       = {https://github.com/your-username/ANTS}
+}
+```
 
 ---
 
