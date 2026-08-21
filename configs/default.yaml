@@ -1,0 +1,86 @@
+# ============================================================
+#  ANTS — Emergent Ant Colony Simulation
+#  Default Experiment Configuration
+# ============================================================
+
+project:
+  name: "ANTS"
+  version: "1.0.0"
+  phase: 1                    # 1 = single-agent baseline, 2 = multi-agent MAPPO
+
+# -----------------------------------------------------------
+#  Environment
+# -----------------------------------------------------------
+env:
+  width: 11
+  height: 11
+  obs_window: 3               # Agent sees a (2w+1) x (2w+1) grid patch
+  min_food_dist: 3            # Minimum Manhattan distance: nest → food
+  max_steps: 300
+
+# -----------------------------------------------------------
+#  Reward Shaping  (used by training/reward_shaping.py)
+# -----------------------------------------------------------
+reward:
+  step_penalty: -0.01         # Per-step existential cost
+  wall_penalty: -0.10         # Collision with wall
+  distance_weight: 0.15       # Scale for potential-based distance shaping
+  revisit_penalty: -0.03      # Per extra visit to an already-seen cell
+  food_reward: 10.0           # Terminal reward on reaching food
+  return_reward: 5.0          # (Phase 2) Reward for returning food to nest
+
+# -----------------------------------------------------------
+#  Phase 1 — RecurrentPPO (LSTM) Baseline
+# -----------------------------------------------------------
+ppo:
+  policy: "MlpLstmPolicy"
+  total_timesteps: 80_000
+  learning_rate: 3.0e-4
+  n_steps: 512
+  batch_size: 64
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.03              # Entropy bonus — keeps exploration alive
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  tensorboard_log: "./ppo_ant_tensorboard/"
+  save_path: "ppo_ant_lstm_baseline"
+
+# -----------------------------------------------------------
+#  Phase 2 — MAPPO (Multi-Agent PPO)  [future]
+# -----------------------------------------------------------
+mappo:
+  n_agents: 4
+  policy: "MlpLstmPolicy"
+  total_timesteps: 500_000
+  learning_rate: 2.5e-4
+  shared_critic: true
+  comms_dim: 16               # Dimensionality of inter-agent messages
+  pheromone_channels: 2       # Food trail + return trail
+
+# -----------------------------------------------------------
+#  Pheromone System  (envs/pheromone.py)
+# -----------------------------------------------------------
+pheromone:
+  evaporation_rate: 0.05      # Fraction lost per step (0–1)
+  diffusion_rate: 0.1         # Fraction that spreads to neighbours
+  deposit_amount: 1.0         # Strength of a single deposit
+  max_strength: 10.0          # Clamp ceiling to prevent runaway accumulation
+
+# -----------------------------------------------------------
+#  Analysis & Evaluation
+# -----------------------------------------------------------
+eval:
+  n_episodes: 100
+  deterministic: true
+  render: false
+  record_heatmap: true
+  heatmap_resolution: 1       # Cells per pixel
+
+logging:
+  level: "INFO"
+  save_metrics: true
+  metrics_path: "./analysis/results/"
+  plot_path: "./analysis/plots/"
