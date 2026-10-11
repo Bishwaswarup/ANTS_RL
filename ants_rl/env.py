@@ -97,6 +97,7 @@ class AntMazeEnv(gym.Env):
         n_train_mazes: int = 0,
         maze_seed_base: int = TRAIN_SEED_BASE,
         maze_algorithm: str = "dfs",
+        braid: float = 0.0,
         reward: dict | str | None = "pbrs",
         gamma: float = 0.99,
         render_mode: str | None = None,
@@ -108,12 +109,15 @@ class AntMazeEnv(gym.Env):
         self.n_train_mazes = n_train_mazes
         self.maze_seed_base = maze_seed_base
         self.maze_algorithm = maze_algorithm
+        self.braid = braid
         self.reward_cfg = resolve_reward(reward)
         self.gamma = gamma
         self.render_mode = render_mode
 
         n_rooms = ((width - 1) // 2) * ((height - 1) // 2)
         self.n_free = 2 * n_rooms - 1  # perfect maze: rooms + (rooms - 1) passages
+        # (braided mazes have a few more free cells; max_steps is kept at the
+        # perfect-maze value so budgets stay comparable across braid levels)
         self.max_steps = max_steps if max_steps is not None else 6 * self.n_free
 
         self.obs_size = 2 * obs_window + 1
@@ -123,7 +127,7 @@ class AntMazeEnv(gym.Env):
         )
         self._maze_cache: dict[int, np.ndarray] = {}
         self._pool = (seeds_in_split(n_train_mazes, maze_seed_base, "train", width, height,
-                                     maze_algorithm) if n_train_mazes > 0 else None)
+                                     maze_algorithm, braid) if n_train_mazes > 0 else None)
 
     # ------------------------------------------------------------------ utils
     def _maze(self, seed: int) -> np.ndarray:
@@ -132,7 +136,7 @@ class AntMazeEnv(gym.Env):
                 self._maze_cache.clear()
             rng = np.random.default_rng(seed)
             self._maze_cache[seed] = generate_maze(
-                self.width, self.height, rng, self.maze_algorithm
+                self.width, self.height, rng, self.maze_algorithm, self.braid
             )
         return self._maze_cache[seed]
 

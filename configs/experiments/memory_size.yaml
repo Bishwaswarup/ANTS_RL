@@ -1,0 +1,12 @@
+# E4 - Minimum memory: LSTM hidden size sweep. How small can the recurrent
+# state get before held-out success collapses? The right-hand wall follower
+# needs ~2 bits (a heading in {up,right,down,left}); compare.
+# 5 sizes x 5 seeds = 25 LSTM runs x 1M steps (~90 min each, one core).
+name: memory_size
+seeds: [0, 1, 2, 3, 4]
+fixed:
+  agent.memory: lstm
+  env.reward.preset: pbrs
+  env.n_train_mazes: 0
+grid:
+  agent.lstm_hidden: [1, 2, 4, 8, 64]
