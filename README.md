@@ -1,266 +1,186 @@
-# 🐜 ANTS — Emergent Ant Colony Simulation
+# ANTS-RL: Partially Observable Maze Foraging with PPO
 
-<div align="center">
-
-[![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)](https://python.org)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org)
-[![Gymnasium](https://img.shields.io/badge/Gymnasium-0.28+-black?logo=openaigym&logoColor=white)](https://gymnasium.farama.org)
-[![Stable Baselines3](https://img.shields.io/badge/SB3-2.0+-blue)](https://stable-baselines3.readthedocs.io)
+[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](https://python.org)
+[![Gymnasium](https://img.shields.io/badge/Gymnasium-0.29+-black)](https://gymnasium.farama.org)
+[![SB3](https://img.shields.io/badge/SB3-2.3+-blue)](https://stable-baselines3.readthedocs.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-22c55e)](LICENSE)
-[![Status](https://img.shields.io/badge/Status-Active-22c55e)]()
-[![Phase](https://img.shields.io/badge/Phase-1%20Complete%20%7C%202%20In%20Progress-orange)]()
-[![IISc](https://img.shields.io/badge/Lab-OUSUMS%20%40%20IISc-blue)]()
 
-**A deep reinforcement learning research project exploring emergent navigation and collective intelligence in procedurally generated mazes.**
+A small, fully reproducible deep-RL testbed: an "ant" with a 7×7 egocentric
+view must find food in procedurally generated mazes. The repository
+accompanies the preprint in [`paper/`](paper/), an empirical study of three
+questions:
 
-[Overview](#overview) · [Demo](#demo) · [Architecture](#architecture) · [Quickstart](#quickstart) · [Results](#results) · [Roadmap](#roadmap) · [Research Context](#research-context)
+1. **Memory.** How much does memory help: none, frame stacking, or an LSTM?
+2. **Layout diversity.** How many distinct training mazes does an agent need
+   before it navigates *unseen* mazes rather than memorising the training ones?
+3. **Reward design.** Sparse reward, exact potential-based shaping, and an
+   ad-hoc shaped reward (the original v0 reward).
 
-</div>
-
----
-
-## Overview
-
-ANTS (Emergent Ant Colony Simulation) models foraging behaviour of real ant colonies using deep RL. A single ant — equipped with only a **partial local view** of its environment — must navigate procedurally generated mazes, find food, and return to the nest. In later phases, multiple agents coordinate through learned pheromone-like communication.
-
-The project is structured as a three-phase research pipeline:
-
-```
-Phase 1 ✅          Phase 2 🔨            Phase 3 📋
-─────────────       ──────────────────    ──────────────────────
-Single-agent        Multi-agent MAPPO     Emergent specialisation
-CNN + Frame-Stack   + Pheromone trails    Scout / Forager roles
-PPO baseline        + Learned comms       Colony-level objectives
-```
-
-> **Key result:** Trained agent successfully navigates 11×11 randomly generated mazes in as few as **16 steps** using only a 7×7 local observation window — demonstrating genuine spatial reasoning under partial observability.
+Every method, learned or hand-coded, is evaluated on the **same fixed set of
+held-out maze layouts**. Results are reported as success rate and SPL (success
+weighted by path length) with 95% bootstrap confidence intervals over seeds.
 
 ---
 
-## Demo
+## What changed in v0.2 (and why the v0 results were withdrawn)
 
-<table>
-<tr>
-<td align="center"><b>Live Evaluation (Pygame)</b></td>
-<td align="center"><b>Visitation Heatmap</b></td>
-</tr>
-<tr>
-<td>Agent 🔴 navigates from Nest 🟫 to Food 🟢. Pink trail shows visited cells.</td>
-<td>Warmer colours = more visits. Reveals the agent's exploration strategy.</td>
-</tr>
-</table>
+An audit of v0 found problems that invalidated its headline numbers:
+
+| # | v0 issue | Effect | Fix |
+|---|---|---|---|
+| 1 | `MazeGenerator.generate()` never reset its grid, so after the first call nothing was carved | Every env instance kept **one fixed maze forever**. Training with 8 envs saw 8 layouts; evaluation used a 9th, unseen one | A new grid is built on every call; layouts are a pure function of a seed |
+| 2 | Python's `random` module, which ignores `env.reset(seed=...)` | Runs could not be reproduced | Everything uses `numpy.random.Generator` seeded through Gymnasium |
+| 3 | `evaluate.py` reset the render env and the policy env separately | The Pygame window showed **a different maze** from the one the agent acted in | Rendering draws the env the policy acts in |
+| 4 | "Reward ≈ 9.6 at convergence / 16-step episodes" | Contradicted by v0's own `models/logs/evaluations.npz`: mean eval reward ≈ −90, mean episode length 270–300 of 300, success 5–20% | Claims removed; all metrics are now computed on held-out layouts |
+| 5 | Distance shaping was called "potential-based" | It left out γ, used Manhattan distance (wrong inside a maze), and was combined with a history-dependent revisit penalty, so policy invariance did not hold | `pbrs` preset: exact γΦ(s′)−Φ(s) on geodesic (BFS) distance. The old reward survives as the `legacy` preset for comparison |
+| 6 | `min_food_dist` measured in Manhattan distance | Nest and food could sit on opposite sides of one wall yet be many steps apart | Measured as geodesic distance |
+| 7 | "View covers < 15% of the maze" | The 7×7 window covers ≈ 40% of an 11×11 grid | Corrected |
+| 8 | Hard-coded hyperparameters, an unused YAML file, empty stubs, binaries in git | — | One YAML config with CLI overrides; binaries ignored; Phase-2 prototypes moved to [`experimental/`](experimental/) |
+
+The `reward` experiment includes `legacy` reward + 8 layouts + frame stack.
+That configuration reproduces the original v0 training setup, so the paper
+can report what v0 *actually* learned.
+
+---
+
+## Install
 
 ```bash
-python evaluate.py               # watch the trained agent
-python evaluate.py --episodes 5  # run 5 episodes back-to-back
+git clone https://github.com/Bishwaswarup/ANTS_RL && cd ANTS_RL
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"          # or: pip install -r requirements.txt
+pytest -q                        # 21 tests, ~30 s
 ```
-
----
-
-## Architecture
-
-### Observation Space
-
-The agent receives a **3-channel 7×7 grid** centred on its current position. It never sees the full maze — only what's within 3 cells in each direction.
-
-```
-Channel 0 — Wall mask      ██ ██ ██ ██
-Channel 1 — Food signal       🟢
-Channel 2 — Nest signal          🟫
-```
-
-**Frame stacking** concatenates the last 4 observations as extra channels, giving the agent implicit motion memory without recurrence:
-
-```
-Single obs: (3, 7, 7)
-Stacked:   (12, 7, 7)   ← 4 frames × 3 channels
-```
-
-### CNN Feature Extractor (`agents/policy.py`)
-
-```
-Input  (12, 7, 7)
-  → Conv2d(12→16, k=3, pad=1) + ReLU     (16, 7, 7)
-  → Conv2d(16→32, k=3, pad=1) + ReLU     (32, 7, 7)
-  → AdaptiveAvgPool2d(3, 3)               (32, 3, 3)
-  → Flatten + Linear(288→64) + ReLU      (64,)
-  → PPO policy/value heads
-```
-
-Spatial structure is preserved throughout — the model knows *where* the food is relative to the agent, not just whether it exists.
-
-### Reward Function
-
-| Component | Formula | Purpose |
-|---|---|---|
-| Step penalty | −0.01 | Efficiency pressure |
-| Wall collision | −0.10 | Discourage bumping |
-| Distance shaping | +0.15 × Δ(Manhattan) | Potential-based guidance |
-| Revisitation | −0.05 × min(visits−1, 5) | Break oscillation loops |
-| Food reward | +10.0 (terminal) | Primary objective |
-
-The distance shaping term satisfies the **potential-based shaping theorem** (Ng et al., 1999): adding any reward of the form `F(s,a,s') = γΦ(s') − Φ(s)` preserves the set of optimal policies of the original MDP. This guarantees that shaping accelerates learning without changing what the agent ultimately learns.
-
-### Training Strategy
-
-| Parameter | Value | Why |
-|---|---|---|
-| Algorithm | PPO | Stable, sample-efficient policy gradient |
-| Memory | Frame stacking (N=4) | Robust vs. LSTM — no gradient-through-time issues |
-| Parallel envs | 8 | 8× faster data collection |
-| `n_steps` | 512 | Long enough rollouts to observe full corridors |
-| `ent_coef` | 0.05 | Maintain exploration pressure |
-| Total timesteps | 500k / run | Stacks across runs via checkpoint resumption |
-
----
-
-## Project Structure
-
-```
-ANTS/
-├── envs/
-│   ├── maze_env.py          # Custom Gymnasium env — reward shaping, partial obs
-│   ├── maze_generator.py    # Randomised DFS perfect maze generation
-│   └── pheromone.py         # Pheromone diffusion physics (Phase 2)
-│
-├── agents/
-│   ├── policy.py            # AntCNNExtractor + AntAttentionExtractor (SB3-compatible)
-│   ├── memory.py            # Spatial working memory + episodic curriculum controller
-│   └── comms.py             # Message channel, comm buffer, centralised critic aggregator
-│
-├── training/
-│   ├── reward_shaping.py    # Composable reward shaper classes
-│   ├── rollout_buffer.py    # Episode statistics tracker (path efficiency, wall hits)
-│   └── mappo.py             # Multi-Agent PPO skeleton (Phase 2)
-│
-├── analysis/
-│   ├── metrics.py           # Episode metrics collection + JSON serialisation
-│   ├── visualize.py         # Heatmaps, training curves, path overlays (matplotlib)
-│   └── message_probe.py     # Linear probing for learned agent representations
-│
-├── configs/
-│   └── default.yaml         # All hyperparameters — single source of truth
-│
-├── train.py                 # Training entrypoint (auto-resumes from checkpoint)
-├── evaluate.py              # Pygame live visualisation
-└── requirements.txt
-```
-
----
 
 ## Quickstart
 
 ```bash
-# 1. Clone and set up
-git clone https://github.com/your-username/ANTS.git
-cd ANTS
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+# train one agent (frame stack, fresh maze every episode, PBRS reward)
+python scripts/train.py
 
-# 2. Train (auto-resumes from checkpoint if one exists)
-python train.py
+# any config key can be overridden
+python scripts/train.py --set agent.memory=lstm env.n_train_mazes=64 seed=2
 
-# 3. Watch the trained agent
-python evaluate.py
+# hand-coded baselines on the same held-out mazes
+python scripts/evaluate.py --baselines
 
-# 4. Run multiple episodes
-python evaluate.py --episodes 10
-
-# 5. Monitor training live
-tensorboard --logdir ppo_ant_tensorboard/
+# watch a trained agent (GIF, or --live with pygame)
+python scripts/render.py --run runs/single/stack4_mazes0_pbrs_w3/seed0 --gif ant.gif --episodes 3
 ```
 
+Each run directory contains `config.yaml` (fully resolved), `progress.csv`
+(SB3 training log), `curves.csv` (held-out success over training),
+`model.zip`, `eval.json` (summary metrics) and `episodes.npz` (per-episode
+results, for paired statistics).
+
 ---
 
-## Results
+## Environment
 
-### Phase 1 — Single Agent Baseline
-
-| Metric | Value |
+| | |
 |---|---|
-| Algorithm | PPO + Frame Stacking |
-| Maze size | 11 × 11 (procedurally generated) |
-| Observation | 7 × 7 local window (partial) |
-| Best episode | **16 steps** to food |
-| Reward at convergence | ~9.6 |
-| Training steps | 500k (1 run) |
+| Maze | 11×11 grid, *perfect* maze (spanning tree: exactly one path between any two cells), randomised DFS. 49 free cells |
+| Observation | `(3, 7, 7)` binary: wall / food / nest, egocentric, out-of-bounds = wall |
+| Actions | up, right, down, left. A move into a wall leaves the agent in place |
+| Episode | starts at the nest; ends on reaching the food or after 294 steps (6 × free cells) |
+| Layouts | `n_train_mazes: N` → a fixed pool of N layouts; `0` → a fresh layout every episode. Nest and food are re-sampled every episode. Held-out layouts use a disjoint seed range |
 
-The agent demonstrates **genuine spatial reasoning**: navigating maze corridors, identifying junctions, and reaching the food source — all from a local view that covers less than 15% of the maze at any moment.
+Reward presets (`env.reward.preset`):
+
+| Preset | Definition |
+|---|---|
+| `sparse` | +1 on reaching food |
+| `pbrs` (default) | sparse + γΦ(s′) − Φ(s), with Φ(s) = −d(s)/D, where d is the BFS distance to the food and D the maximum such distance in the maze. Φ = 0 at the goal ⇒ policy-invariant (Ng et al., 1999) |
+| `legacy` | v0 reward: −0.01/step, −0.1/wall hit, +0.15·ΔManhattan, −0.05·min(visits−1, 5), +10 on food. **Not** policy-invariant |
+
+Baselines (`ants_rl/baselines.py`): **random walk**; **wall follower**
+(right-hand rule: uses only the 4 adjacent cells plus a heading, and is
+guaranteed to succeed in a perfect maze); **oracle** (true shortest path,
+SPL = 1).
+
+Held-out reference numbers (500 layouts, 11×11):
+
+| Baseline | Success | SPL |
+|---|---|---|
+| Random walk | 30.8% | 0.042 |
+| Wall follower | 100% | 0.649 |
+| Oracle | 100% | 1.000 |
 
 ---
 
-## Research Context
+## Reproducing the paper
 
-ANTS sits at the intersection of several active research areas:
+```bash
+# 1. list what will run
+python scripts/run_experiments.py configs/experiments/main.yaml --dry-run
 
-**Multi-Agent Reinforcement Learning (MARL)** — Phase 2 uses CTDE (Centralised Training, Decentralised Execution) via MAPPO. Each agent acts on its own local observation at test time, but training uses a shared centralised critic.
+# 2. run (resumable: finished runs are skipped)
+python scripts/run_experiments.py configs/experiments/main.yaml   --jobs 6
+python scripts/run_experiments.py configs/experiments/reward.yaml --jobs 6
+python scripts/run_experiments.py configs/experiments/window.yaml --jobs 6
+python scripts/evaluate.py --baselines
 
-**Emergent Communication** — Do agents develop interpretable messaging protocols? Tested via linear probing in `analysis/message_probe.py`. A logistic regression trained on agent messages can reveal whether they encode food direction, carrying state, etc.
+# 3. tables -> paper/tables/, figures -> paper/figures/, CSVs -> results/
+python scripts/aggregate.py
 
-**Stigmergy** — Coordination through environmental modification (pheromones), as studied in swarm intelligence. The `envs/pheromone.py` module implements physics-accurate diffusion: `P[t+1] = (P[t] × (1−ε)) ⊛ K` where ε is evaporation rate and K is a normalised diffusion kernel.
+# 4. build the paper
+cd paper && latexmk -pdf main.tex
+```
 
-**Curriculum Learning** — `agents/memory.py` implements `EpisodicMemory` for automatic difficulty scaling: increase `min_food_dist` when the rolling success rate exceeds 75%, decrease it if performance drops below 25%.
+| Experiment | Grid | Runs (5 seeds) |
+|---|---|---|
+| `main` | memory {none, stack, lstm} × train layouts {1, 8, 64, 512, ∞} | 75 |
+| `reward` | reward {sparse, pbrs, legacy} × train layouts {8, ∞}, frame stack | 30 |
+| `window` | window radius {1, 2, 3} × memory {stack, lstm}, ∞ layouts | 30 |
 
-**Potential-Based Reward Shaping** — The distance shaping component uses Manhattan distance as a potential function, satisfying the Ng et al. (1999) theorem that guarantees policy-invariance of the shaping. See `docs/theory.pdf` for the full mathematical treatment.
+**Compute.** Measured on one CPU core with 1 torch thread: PPO
+(none/stack) runs at about 1,300 env steps/s, so a 1M-step run takes about
+15 min including evaluation. RecurrentPPO (LSTM) runs at about 190 steps/s,
+about 90 min per run. The full `main` grid is about 50 core-hours, dominated
+by the LSTM runs. Use `--jobs` up to your core count. `--shard i/n` splits a
+grid across cluster jobs. For a quick pilot, add
+`--set ppo.total_timesteps=200000`.
+
+`configs/experiments/smoke.yaml` runs the whole pipeline in a couple of minutes.
 
 ---
+
+## Repository layout
+
+```
+ants_rl/
+  maze.py          maze generation (DFS / Prim), BFS distances, entity placement
+  env.py           AntMazeEnv + reward presets
+  policy.py        CNN feature extractors (SB3)
+  baselines.py     random / wall-follower / oracle
+  evaluation.py    batched evaluation on fixed episode sets, SPL, frame stacker
+  training.py      model construction, learning-curve callback, eval protocol
+  config.py        YAML + dotted CLI overrides
+scripts/           train, evaluate, run_experiments, aggregate, render
+configs/           default.yaml + experiments/*.yaml
+tests/             maze validity, seeding, observation, PBRS telescoping, pipeline
+paper/             LaTeX preprint (tables/figures generated by aggregate.py)
+experimental/      untested Phase-2 prototypes (pheromones, comms)
+```
 
 ## Roadmap
 
-- [x] Phase 1: Single-agent CNN + frame-stack PPO baseline
-- [x] Procedural DFS maze generation
-- [x] Composable reward shaping framework
-- [x] Custom CNN feature extractor (SB3-compatible)
-- [x] Pheromone diffusion physics engine
-- [x] Inter-agent message passing channel
-- [x] Spatial + episodic memory modules
-- [x] Analysis + linear probing tools
-- [ ] Phase 2: Multi-agent environment with pheromone observations
-- [ ] MAPPO training loop
-- [ ] Curriculum learning integration
-- [ ] Phase 3: Emergent role specialisation (scouts vs. foragers)
-
----
-
-## Dependencies
-
-| Package | Version | Purpose |
-|---|---|---|
-| `gymnasium` | ≥0.28 | RL environment API |
-| `stable-baselines3` | ≥2.0 | PPO implementation |
-| `sb3-contrib` | ≥2.0 | RecurrentPPO (LSTM alternative) |
-| `torch` | ≥2.0 | Neural network backend |
-| `numpy` | ≥1.24 | Array operations |
-| `scipy` | any | Pheromone convolution |
-| `pygame` | ≥2.5 | Live visualisation |
-| `matplotlib` | any | Analysis plots |
-| `tensorboard` | ≥2.13 | Training monitoring |
-
----
-
-## Author
-
-**Priya** — OUSUMS Lab, Department of Physics, IISc Bangalore
-*Exploring emergent collective behaviour through the lens of reinforcement learning.*
-
----
+- [x] v0.2: bug fixes, reproducible pipeline, held-out evaluation, baselines
+- [ ] Run the experiment grids and fill in the preprint
+- [ ] Phase 2: multi-ant foraging with pheromone fields (`experimental/`)
 
 ## Citation
 
-If you use this project in your research, please cite:
-
 ```bibtex
-@misc{ants2025,
-  author    = {Priya},
-  title     = {ANTS: Emergent Ant Colony Simulation via Deep Reinforcement Learning},
-  year      = {2025},
-  publisher = {GitHub},
-  url       = {https://github.com/your-username/ANTS}
+@misc{bishwaswarup2026antsrl,
+  author       = {Bishwaswarup},
+  title        = {Memory, Layout Diversity and Reward Shaping in Partially Observable
+                  Maze Foraging: A Reproducible Small-Scale Study},
+  year         = {2026},
+  howpublished = {\url{https://github.com/Bishwaswarup/ANTS_RL}},
+  note         = {Preprint}
 }
 ```
 
----
-
-## License
-
-MIT — free to use, modify, and build upon.
+**Author:** Bishwaswarup, OUSUMS Lab, Department of Physics, Indian Institute
+of Science, Bangalore. Licensed under MIT.

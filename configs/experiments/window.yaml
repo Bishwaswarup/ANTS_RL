@@ -1,0 +1,9 @@
+# E3 - Field of view. 3 window radii x 2 memory types x 5 seeds = 30 runs.
+name: window
+seeds: [0, 1, 2, 3, 4]
+fixed:
+  env.reward.preset: pbrs
+  env.n_train_mazes: 0
+grid:
+  env.obs_window: [1, 2, 3]
+  agent.memory: [stack, lstm]

@@ -1,0 +1,26 @@
+__pycache__/
+*.pyc
+.idea/
+.vscode/
+.venv/
+.DS_Store
+.pytest_cache/
+*.egg-info/
+
+# experiment outputs (regenerate with scripts/; archive separately, e.g. Zenodo)
+runs/
+results/*/runs.csv
+legacy_artifacts/
+*.zip
+*tfevents*
+
+# LaTeX build
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.log
+paper/*.out
+paper/*.pdf
+paper/*.fls
+paper/*.fdb_latexmk
+paper/*.synctex.gz
