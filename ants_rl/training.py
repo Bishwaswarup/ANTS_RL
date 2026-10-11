@@ -30,7 +30,8 @@ def env_kwargs(cfg: dict) -> dict:
 
 def heldout_for(env_cfg: dict, n: int):
     return heldout_episodes(n, width=env_cfg.get("width", 11), height=env_cfg.get("height", 11),
-                            algorithm=env_cfg.get("maze_algorithm", "dfs"))
+                            algorithm=env_cfg.get("maze_algorithm", "dfs"),
+                            braid=env_cfg.get("braid", 0.0))
 
 
 def build_vec_env(cfg: dict, seed: int):

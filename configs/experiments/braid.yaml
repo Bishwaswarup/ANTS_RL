@@ -1,0 +1,10 @@
+# E5 - (optional) train on braided mazes, to compare with agents trained on
+# perfect mazes and evaluated on braided ones (scripts/eval_braid.py).
+name: braid
+seeds: [0, 1, 2]
+fixed:
+  env.reward.preset: pbrs
+  env.n_train_mazes: 0
+  env.braid: 0.5
+grid:
+  agent.memory: [stack, lstm]

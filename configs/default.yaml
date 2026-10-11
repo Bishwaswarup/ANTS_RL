@@ -15,6 +15,7 @@ env:
   n_train_mazes: 0         # 0 = fresh layout every episode; N>0 = fixed pool of N layouts
   maze_seed_base: 0
   maze_algorithm: dfs      # dfs | prim
+  braid: 0.0               # P(dead end is opened) -> loops; 0 = perfect maze
   reward:
     preset: pbrs           # sparse | pbrs | legacy (see ants_rl/env.py)
 

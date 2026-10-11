@@ -23,10 +23,10 @@ TRAIN_PLACEMENT_BASE = 5_000_000
 
 
 def heldout_episodes(n: int, offset: int = 0, width: int = 11, height: int = 11,
-                     algorithm: str = "dfs") -> list[tuple[int, int]]:
+                     algorithm: str = "dfs", braid: float = 0.0) -> list[tuple[int, int]]:
     """``n`` episodes on held-out ("test"-split) layouts. Seeds are distinct;
     layouts are distinct up to the (rare) case of two seeds giving one layout."""
-    seeds = seeds_in_split(offset + n, EVAL_SEED_BASE, "test", width, height, algorithm)[offset:]
+    seeds = seeds_in_split(offset + n, EVAL_SEED_BASE, "test", width, height, algorithm, braid)[offset:]
     return [(s, s) for s in seeds]
 
 
@@ -36,10 +36,11 @@ def train_episodes(env_cfg: dict, n: int) -> list[tuple[int, int]]:
     pool = env_cfg.get("n_train_mazes", 0)
     w, h = env_cfg.get("width", 11), env_cfg.get("height", 11)
     alg = env_cfg.get("maze_algorithm", "dfs")
+    br = env_cfg.get("braid", 0.0)
     if pool > 0:
-        seeds = seeds_in_split(pool, env_cfg.get("maze_seed_base", 0), "train", w, h, alg)
+        seeds = seeds_in_split(pool, env_cfg.get("maze_seed_base", 0), "train", w, h, alg, br)
         return [(seeds[i % pool], TRAIN_PLACEMENT_BASE + i) for i in range(n)]
-    seeds = seeds_in_split(n, 20_000_000, "train", w, h, alg)
+    seeds = seeds_in_split(n, 20_000_000, "train", w, h, alg, br)
     return [(s, TRAIN_PLACEMENT_BASE + i) for i, s in enumerate(seeds)]
 
 

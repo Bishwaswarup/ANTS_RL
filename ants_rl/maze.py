@@ -38,15 +38,20 @@ def generate_maze(
     height: int,
     rng: np.random.Generator,
     algorithm: str = "dfs",
+    braid: float = 0.0,
 ) -> np.ndarray:
-    """Generate a *perfect* maze (spanning tree over rooms: exactly one simple
-    path between any two free cells).
+    """Generate a maze. With ``braid = 0`` it is *perfect* (spanning tree over
+    rooms: exactly one simple path between any two free cells); ``braid > 0``
+    removes dead ends to create loops (see :func:`braid_maze`).
 
     Parameters
     ----------
     algorithm : ``"dfs"`` (randomised depth-first search / recursive
         backtracker; long winding corridors, few branches) or ``"prim"``
         (randomised Prim's; many short dead ends).
+    braid : probability that each dead end is opened into a neighbouring room.
+        ``0`` leaves the maze perfect (and consumes no extra randomness, so
+        existing seeds give identical layouts); ``1`` removes every dead end.
     """
     _check_dims(width, height)
     grid = np.ones((width, height), dtype=np.int8)  # fresh grid every call
@@ -86,6 +91,33 @@ def generate_maze(
                 frontier.extend((nx, ny, ax, ay) for ax, ay in unvisited_neighbours(nx, ny))
     else:
         raise ValueError(f"Unknown maze algorithm: {algorithm!r}")
+    if braid > 0:
+        braid_maze(grid, rng, braid)
+    return grid
+
+
+def braid_maze(grid: np.ndarray, rng: np.random.Generator, p: float) -> np.ndarray:
+    """In place: for every dead end (free cell with exactly one free neighbour),
+    with probability ``p`` knock out one wall that separates it from another
+    room. The result has cycles, so wall following no longer guarantees
+    reaching every cell. Rooms stay connected, and the border stays wall."""
+    if not 0.0 <= p <= 1.0:
+        raise ValueError(f"braid must be in [0, 1], got {p}")
+    w, h = grid.shape
+    dead_ends = [c for c in free_cells(grid)
+                 if sum(grid[c[0] + dx, c[1] + dy] == FREE for dx, dy in ACTION_DELTAS) == 1]
+    for x, y in dead_ends:
+        if rng.random() >= p:
+            continue
+        # Candidate walls: adjacent wall with a free cell directly behind it
+        # (inside the border), i.e. a wall between two rooms/corridors.
+        cands = [(x + dx, y + dy) for dx, dy in ACTION_DELTAS
+                 if grid[x + dx, y + dy] == WALL
+                 and 0 < x + 2 * dx < w - 1 and 0 < y + 2 * dy < h - 1
+                 and grid[x + 2 * dx, y + 2 * dy] == FREE]
+        if cands:
+            wx, wy = cands[int(rng.integers(len(cands)))]
+            grid[wx, wy] = FREE
     return grid
 
 
@@ -146,17 +178,18 @@ def layout_split(grid: np.ndarray) -> str:
     return "test" if int.from_bytes(h, "little") % TEST_FRACTION_MOD == 0 else "train"
 
 
-def maze_from_seed(width: int, height: int, seed: int, algorithm: str = "dfs") -> np.ndarray:
-    return generate_maze(width, height, np.random.default_rng(seed), algorithm)
+def maze_from_seed(width: int, height: int, seed: int, algorithm: str = "dfs",
+                   braid: float = 0.0) -> np.ndarray:
+    return generate_maze(width, height, np.random.default_rng(seed), algorithm, braid)
 
 
 @lru_cache(maxsize=64)
 def seeds_in_split(n: int, base: int, split: str, width: int = 11, height: int = 11,
-                   algorithm: str = "dfs") -> tuple[int, ...]:
+                   algorithm: str = "dfs", braid: float = 0.0) -> tuple[int, ...]:
     """First ``n`` seeds >= ``base`` whose layout falls in ``split``."""
     out, seed = [], base
     while len(out) < n:
-        if split == "any" or layout_split(maze_from_seed(width, height, seed, algorithm)) == split:
+        if split == "any" or layout_split(maze_from_seed(width, height, seed, algorithm, braid)) == split:
             out.append(seed)
         seed += 1
     return tuple(out)

@@ -51,7 +51,8 @@ def eval_baselines(cfg_path, out: Path):
             if size != cfg["env"]["width"]:
                 ecfg["max_steps"] = None
             res = evaluate_baseline(cls(), ecfg, heldout_episodes(e["n_episodes"], width=size, height=size,
-                                                                  algorithm=ecfg["maze_algorithm"]),
+                                                                  algorithm=ecfg["maze_algorithm"],
+                                                                  braid=ecfg.get("braid", 0.0)),
                                     gamma=cfg["ppo"]["gamma"])
             payload[name][str(size)] = summarise(res)
             s = payload[name][str(size)]
