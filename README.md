@@ -137,11 +137,13 @@ cd paper && latexmk -pdf main.tex
 | `memory_size` | LSTM hidden units {1, 2, 4, 8, 64}, ∞ layouts | 25 |
 | `braid` (optional) | train on braided mazes (`env.braid=0.5`), memory {stack, lstm} | 6 (3 seeds) |
 
-**Compute.** Measured on one CPU core with 1 torch thread: PPO
-(none/stack) runs at about 1,300 env steps/s, so a 1M-step run takes about
-15 min including evaluation. RecurrentPPO (LSTM) runs at about 190 steps/s,
-about 90 min per run. The full `main` grid is about 50 core-hours, dominated
-by the LSTM runs. Use `--jobs` up to your core count. `--shard i/n` splits a
+**Compute.** Every run is 2M env steps (chosen by a pilot; see the paper).
+Measured on an M1 MacBook Air with 1 torch thread per run: PPO (none/stack)
+runs at about 1,350 env steps/s alone and about 900 steps/s each with 3
+runs in parallel, so a 2M-step run takes about 25–40 min. RecurrentPPO (LSTM)
+runs at about 190 steps/s, roughly 3 h per run. The `main` grid without LSTM
+(50 runs) is about 8 h with `--jobs 4`. The LSTM runs dominate everything
+else. Use `--jobs` up to your core count. `--shard i/n` splits a
 grid across cluster jobs. For a quick pilot, add
 `--set ppo.total_timesteps=200000`.
 
