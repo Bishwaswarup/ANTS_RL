@@ -1,0 +1,14 @@
+# Tiny end-to-end check of the whole pipeline (~1-2 min on a laptop).
+name: smoke
+seeds: [0, 1]
+fixed:
+  ppo.total_timesteps: 8192
+  ppo.n_steps: 128
+  eval.n_episodes: 40
+  eval.n_train_episodes: 20
+  eval.curve_every: 4096
+  eval.curve_episodes: 20
+  eval.transfer_sizes: [15]
+grid:
+  agent.memory: [none, stack, lstm]
+  env.n_train_mazes: [8, 0]

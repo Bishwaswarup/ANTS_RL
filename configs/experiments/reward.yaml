@@ -1,0 +1,10 @@
+# E2 - Reward design. 'legacy' + 8 layouts + frame stack reproduces the
+# original v0 training setup (8 parallel envs that never regenerated their maze).
+# 3 rewards x 2 pool sizes x 5 seeds = 30 runs.
+name: reward
+seeds: [0, 1, 2, 3, 4]
+fixed:
+  agent.memory: stack
+grid:
+  env.reward.preset: [sparse, pbrs, legacy]
+  env.n_train_mazes: [8, 0]

@@ -1,0 +1,9 @@
+# E1 - Memory architecture x layout diversity (the main result).
+# 3 memory types x 5 pool sizes x 5 seeds = 75 runs x 1M steps.
+name: main
+seeds: [0, 1, 2, 3, 4]
+fixed:
+  env.reward.preset: pbrs
+grid:
+  agent.memory: [none, stack, lstm]
+  env.n_train_mazes: [1, 8, 64, 512, 0]   # 0 = fresh layout every episode

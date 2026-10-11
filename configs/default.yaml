@@ -1,86 +1,54 @@
 # ============================================================
-#  ANTS — Emergent Ant Colony Simulation
-#  Default Experiment Configuration
+#  ANTS-RL default configuration (single source of truth).
+#  Every run writes its fully-resolved config to <run_dir>/config.yaml.
+#  Override from the CLI:  python scripts/train.py --set agent.memory=lstm
 # ============================================================
 
-project:
-  name: "ANTS"
-  version: "1.0.0"
-  phase: 1                    # 1 = single-agent baseline, 2 = multi-agent MAPPO
+seed: 0
 
-# -----------------------------------------------------------
-#  Environment
-# -----------------------------------------------------------
 env:
   width: 11
   height: 11
-  obs_window: 3               # Agent sees a (2w+1) x (2w+1) grid patch
-  min_food_dist: 3            # Minimum Manhattan distance: nest → food
-  max_steps: 300
+  obs_window: 3            # agent sees a (2k+1)x(2k+1) egocentric patch
+  min_food_dist: 3         # minimum *geodesic* nest->food distance
+  max_steps: null          # null -> 6 x (#free cells) = 294 for 11x11
+  n_train_mazes: 0         # 0 = fresh layout every episode; N>0 = fixed pool of N layouts
+  maze_seed_base: 0
+  maze_algorithm: dfs      # dfs | prim
+  reward:
+    preset: pbrs           # sparse | pbrs | legacy (see ants_rl/env.py)
 
-# -----------------------------------------------------------
-#  Reward Shaping  (used by training/reward_shaping.py)
-# -----------------------------------------------------------
-reward:
-  step_penalty: -0.01         # Per-step existential cost
-  wall_penalty: -0.10         # Collision with wall
-  distance_weight: 0.15       # Scale for potential-based distance shaping
-  revisit_penalty: -0.03      # Per extra visit to an already-seen cell
-  food_reward: 10.0           # Terminal reward on reaching food
-  return_reward: 5.0          # (Phase 2) Reward for returning food to nest
+agent:
+  memory: stack            # none | stack | lstm
+  n_stack: 4               # frames, used when memory=stack
+  extractor: cnn           # cnn | attention
+  features_dim: 64
+  lstm_hidden: 64          # used when memory=lstm
 
-# -----------------------------------------------------------
-#  Phase 1 — RecurrentPPO (LSTM) Baseline
-# -----------------------------------------------------------
 ppo:
-  policy: "MlpLstmPolicy"
-  total_timesteps: 80_000
+  total_timesteps: 1000000
+  n_envs: 8
   learning_rate: 3.0e-4
-  n_steps: 512
-  batch_size: 64
+  n_steps: 256             # per env per update (rollout = n_envs * n_steps)
+  batch_size: 256
   n_epochs: 10
   gamma: 0.99
   gae_lambda: 0.95
   clip_range: 0.2
-  ent_coef: 0.03              # Entropy bonus — keeps exploration alive
+  ent_coef: 0.01
   vf_coef: 0.5
   max_grad_norm: 0.5
-  tensorboard_log: "./ppo_ant_tensorboard/"
-  save_path: "ppo_ant_lstm_baseline"
+  device: cpu
 
-# -----------------------------------------------------------
-#  Phase 2 — MAPPO (Multi-Agent PPO)  [future]
-# -----------------------------------------------------------
-mappo:
-  n_agents: 4
-  policy: "MlpLstmPolicy"
-  total_timesteps: 500_000
-  learning_rate: 2.5e-4
-  shared_critic: true
-  comms_dim: 16               # Dimensionality of inter-agent messages
-  pheromone_channels: 2       # Food trail + return trail
-
-# -----------------------------------------------------------
-#  Pheromone System  (envs/pheromone.py)
-# -----------------------------------------------------------
-pheromone:
-  evaporation_rate: 0.05      # Fraction lost per step (0–1)
-  diffusion_rate: 0.1         # Fraction that spreads to neighbours
-  deposit_amount: 1.0         # Strength of a single deposit
-  max_strength: 10.0          # Clamp ceiling to prevent runaway accumulation
-
-# -----------------------------------------------------------
-#  Analysis & Evaluation
-# -----------------------------------------------------------
 eval:
-  n_episodes: 100
-  deterministic: true
-  render: false
-  record_heatmap: true
-  heatmap_resolution: 1       # Cells per pixel
+  n_episodes: 500          # held-out layouts for the final evaluation
+  n_train_episodes: 200    # episodes from the training layout distribution
+  curve_every: 50000       # env steps between learning-curve evaluations
+  curve_episodes: 100      # held-out episodes per learning-curve point
+  modes: [deterministic, stochastic]
+  transfer_sizes: [15, 21] # extra held-out evals on larger mazes (same window)
 
-logging:
-  level: "INFO"
-  save_metrics: true
-  metrics_path: "./analysis/results/"
-  plot_path: "./analysis/plots/"
+output:
+  root: runs
+  save_model: true
+  tensorboard: false
