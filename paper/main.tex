@@ -139,9 +139,15 @@ favours long corridors and is not uniform over spanning trees). Exactly one
 simple path joins any two of its $49$ free cells. A layout is a
 deterministic function of an integer seed. Training layouts come either
 from a fixed pool of $N$ seeds ($N\in\{1,8,64,512\}$) or are freshly sampled
-every episode ($N=\infty$). Held-out layouts use a disjoint seed range. The
-$5\times5$ room lattice has $557{,}568{,}000$ spanning trees. Empirically,
-OVERLAP_SENTENCE
+every episode ($N=\infty$). The $5\times5$ room lattice has
+$557{,}568{,}000$ spanning trees, but randomised DFS samples them far from
+uniformly: of $200{,}000$ procedurally sampled layouts only $158{,}430$ were
+distinct, and $255$ samples coincided with one of $500$ layouts drawn from a
+disjoint \emph{seed} range (\texttt{scripts/layout\_stats.py}). Separating
+seeds is therefore not enough. We assign every layout to a split by a hash of
+its cells, with one layout in ten reserved for testing. Training only ever uses
+train-split layouts and held-out evaluation only test-split layouts, so the
+overlap is zero by construction (verified: $0$ hits in the same $200{,}000$ samples).
 
 \paragraph{Episodes.} The nest and food are placed uniformly at random
 among free cells, subject to a geodesic (shortest-path) distance of at least

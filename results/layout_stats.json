@@ -1,0 +1,10 @@
+{
+ "size": 11,
+ "samples": 200000,
+ "distinct": 158430,
+ "heldout": 500,
+ "heldout_distinct_new": 499,
+ "hits_seed_range_split": 255,
+ "train_split_samples": 179987,
+ "hits_hash_split": 0
+}
