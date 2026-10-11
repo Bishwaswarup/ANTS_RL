@@ -226,8 +226,9 @@ Frame stack & 4 & LSTM hidden & 64 \\
 \section{Evaluation Protocol}\label{sec:protocol}
 
 \begin{itemize}[leftmargin=*,itemsep=2pt]
-  \item \textbf{Held-out set}: 500 episodes on 500 distinct unseen layouts,
-  each with a fixed nest and food placement. Every method sees exactly the
+  \item \textbf{Held-out set}: 500 episodes on 500 test-split layouts
+  (\cref{sec:env}), which never occur in training, each with a fixed nest
+  and food placement. Every method sees exactly the
   same episodes, so comparisons are paired.
   \item \textbf{Training distribution}: 200 episodes on training layouts
   with fresh placements. The difference between training and held-out success
@@ -253,17 +254,7 @@ Frame stack & 4 & LSTM hidden & 64 \\
 \caption{Non-learned baselines on the held-out episodes (500 layouts per size).
 The wall follower always succeeds, but its path is on average much longer than the shortest path.}
 \label{tab:baselines}
-\begin{tabular}{@{}lcccccc@{}}
-\toprule
- & \multicolumn{2}{c}{$11\times11$} & \multicolumn{2}{c}{$15\times15$} & \multicolumn{2}{c}{$21\times21$} \\
-\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}
-Baseline & Success & SPL & Success & SPL & Success & SPL \\
-\midrule
-Random walk   & 30.8 & 4.2 & 22.8 & 2.4 & 17.6 & 1.1 \\
-Wall follower & 100.0 & 64.9 & 100.0 & 62.1 & 100.0 & 52.0 \\
-Oracle        & 100.0 & 100.0 & 100.0 & 100.0 & 100.0 & 100.0 \\
-\bottomrule
-\end{tabular}
+\maybeinput{tables/baselines.tex}  % generated from results/baselines.json by scripts/aggregate.py
 \end{table}
 
 % =====================================================================

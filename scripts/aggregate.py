@@ -144,6 +144,27 @@ def transfer_table(summ: pd.DataFrame, mode="stochastic") -> str:
     return "\n".join(lines) + "\n"
 
 
+def baselines_table(baselines: dict) -> str:
+    """Success / SPL (%) of the non-learned baselines, straight from results/baselines.json."""
+    names = {"random": "Random walk", "wall_follower": "Wall follower", "oracle": "Oracle"}
+    sizes = sorted({int(z) for b in baselines.values() for z in b})
+    lines = [r"\begin{tabular}{@{}l" + "cc" * len(sizes) + "@{}}", r"\toprule",
+             " & " + " & ".join(rf"\multicolumn{{2}}{{c}}{{${z}\times{z}$}}" for z in sizes) + r" \\",
+             "".join(rf"\cmidrule(lr){{{2 + 2 * i}-{3 + 2 * i}}}" for i in range(len(sizes))),
+             "Baseline & " + " & ".join(["Success & SPL"] * len(sizes)) + r" \\", r"\midrule"]
+    for key in ("random", "wall_follower", "oracle"):
+        if key not in baselines:
+            continue
+        cells = []
+        for z in sizes:
+            m = baselines[key].get(str(z))
+            cells += (["--", "--"] if m is None else
+                      [f"{100 * m['success_rate']:.1f}", f"{100 * m['spl']:.1f}"])
+        lines.append(f"{names[key]} & " + " & ".join(cells) + r" \\")
+    lines += [r"\bottomrule", r"\end{tabular}"]
+    return "\n".join(lines) + "\n"
+
+
 # ----------------------------------------------------------------- figures
 def _style(ax):
     for sp in ("top", "right"):
@@ -302,12 +323,16 @@ def main():
     plt.rcParams.update({"font.family": "serif", "pdf.fonttype": 42, "axes.labelcolor": MUTED})
 
     runs_root = Path(args.runs)
-    exps = args.exp or sorted(p.name for p in runs_root.iterdir() if p.is_dir())
+    exps = args.exp or (sorted(p.name for p in runs_root.iterdir() if p.is_dir())
+                        if runs_root.exists() else [])
     bpath = Path(args.results) / "baselines.json"
     baselines = json.loads(bpath.read_text()) if bpath.exists() else None
     fig_dir, tab_dir = Path(args.paper) / "figures", Path(args.paper) / "tables"
     fig_dir.mkdir(parents=True, exist_ok=True)
     tab_dir.mkdir(parents=True, exist_ok=True)
+    if baselines:
+        (tab_dir / "baselines.tex").write_text(baselines_table(baselines))
+        print(f"[baselines] wrote {tab_dir / 'baselines.tex'}")
 
     for exp in exps:
         df = collect(runs_root / exp)

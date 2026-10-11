@@ -24,3 +24,6 @@ paper/*.pdf
 paper/*.fls
 paper/*.fdb_latexmk
 paper/*.synctex.gz
+
+# git bundles used to move commits between machines
+*.bundle
