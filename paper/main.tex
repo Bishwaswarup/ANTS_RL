@@ -214,7 +214,7 @@ value. The memory variants differ only in their input or core:
 We train with PPO~\citep{schulman2017ppo} and GAE~\citep{schulman2016gae} in
 Stable-Baselines3~\citep{raffin2021sb3}, using one hyperparameter setting
 for every condition (\cref{tab:hparams}) and no per-condition tuning. Each run
-lasts $10^6$ environment steps.
+lasts $2\times10^6$ environment steps.
 \paragraph{Pilot.} We fixed the shared settings with a single pilot before
 running any grid (frame stack, $N=\infty$, one seed, $10^6$ steps); see
 \citet{andrychowicz2021matters} on the sensitivity of on-policy methods. With
@@ -222,9 +222,17 @@ PBRS and no step cost the deterministic policy pushed into walls on most steps
 (56\% wall hits at $10^6$ steps, 92\% at $2\times10^5$). Adding $c=0.01$ raised
 held-out SPL from 0.22 to 0.33 (stochastic) and from 0.17 to 0.31
 (deterministic), and lowered the wall-hit rate from 43\% to 28\% (stochastic).
-Both pilots were still improving at $10^6$ steps.
-\todo{Fill in the outcome of the longer pilot (training budget / $\gamma$) and
-the budget finally used.}
+Both pilots were still improving at $10^6$ steps, so we ran three
+$3\times10^6$-step pilots with the step cost: the default settings,
+$\gamma=0.995$, and 16 parallel environments instead of 8. Final held-out
+success (stochastic) was 82.2\%, 80.8\% and 75.4\%, with SPL 0.46, 0.48 and
+0.39. With one seed each, the first two are indistinguishable. Doubling the
+environments learned faster per step early on but ended lower. The default
+run's held-out curve was within noise of its final value from about
+$1.5$--$2\times10^6$ steps. We therefore kept $\gamma=0.99$ and 8 environments,
+and fixed the budget at $2\times10^6$ steps for every condition. Even after
+$3\times10^6$ steps the best pilot's SPL (0.48) remained below the wall
+follower's (0.64, \cref{tab:baselines}).
 
 \begin{table}[t]
 \centering\small
@@ -237,7 +245,7 @@ Rollout length / env & 256 & GAE $\lambda$ & 0.95 \\
 Minibatch size & 256 & Clip $\epsilon$ & 0.2 \\
 Epochs / update & 10 & Entropy coef. & 0.01 \\
 Learning rate & $3\times10^{-4}$ (Adam) & Value coef. & 0.5 \\
-Total env steps & $10^6$ & Max grad norm & 0.5 \\
+Total env steps & $2\times10^6$ & Max grad norm & 0.5 \\
 Frame stack & 4 & LSTM hidden & 64 \\
 \bottomrule
 \end{tabular}
