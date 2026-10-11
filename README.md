@@ -117,7 +117,8 @@ the paper's table is generated from that file by `scripts/aggregate.py`):
 python scripts/run_experiments.py configs/experiments/main.yaml --dry-run
 
 # 2. run (resumable: finished runs are skipped)
-python scripts/run_experiments.py configs/experiments/main.yaml   --jobs 6
+python scripts/run_experiments.py configs/experiments/main.yaml   --jobs 4
+python scripts/run_experiments.py configs/experiments/main_lstm.yaml --jobs 4
 python scripts/run_experiments.py configs/experiments/reward.yaml --jobs 6
 python scripts/run_experiments.py configs/experiments/window.yaml --jobs 6
 python scripts/evaluate.py --baselines
@@ -131,7 +132,8 @@ cd paper && latexmk -pdf main.tex
 
 | Experiment | Grid | Runs (5 seeds) |
 |---|---|---|
-| `main` | memory {none, stack, lstm} × train layouts {1, 8, 64, 512, ∞} | 75 |
+| `main` | memory {none, stack} × train layouts {1, 8, 64, 512, ∞} | 50 |
+| `main_lstm` | LSTM × train layouts {8, ∞} (3 seeds; same output folder as `main`) | 6 |
 | `reward` | reward {sparse, pbrs, legacy} × train layouts {8, ∞}, frame stack | 30 |
 | `window` | window radius {1, 2, 3} × memory {stack, lstm}, ∞ layouts | 30 |
 | `memory_size` | LSTM hidden units {1, 2, 4, 8, 64}, ∞ layouts | 25 |

@@ -1,0 +1,10 @@
+# E1 (LSTM part). Writes into runs/main/ next to the other memory types, so
+# aggregate.py plots all three together. Reduced: 2 pool sizes x 3 seeds = 6 runs
+# (~3 h each). Add pool sizes / seeds here if compute allows.
+name: main
+seeds: [0, 1, 2]
+fixed:
+  env.reward.preset: pbrs
+grid:
+  agent.memory: [lstm]
+  env.n_train_mazes: [8, 0]
