@@ -1,0 +1,409 @@
+\documentclass[11pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=green!40!black,urlcolor=blue!60!black]{hyperref}
+\usepackage[capitalize]{cleveref}
+\usepackage{enumitem}
+
+\newtheorem{proposition}{Proposition}
+\newcommand{\todo}[1]{{\color{red!75!black}\textbf{[TODO:} #1\textbf{]}}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\cS}{\mathcal{S}}
+\newcommand{\cA}{\mathcal{A}}
+\newcommand{\cO}{\mathcal{O}}
+% Include a generated table/figure if it exists, otherwise show a placeholder.
+\newcommand{\maybeinput}[1]{\IfFileExists{#1}{\input{#1}}{\fbox{\parbox{0.8\linewidth}{\centering\small\todo{run \texttt{scripts/aggregate.py} to generate \texttt{#1}}}}}}
+\newcommand{\maybegraphic}[2]{\IfFileExists{#2}{\includegraphics[#1]{#2}}{\fbox{\parbox[c][4cm]{0.8\linewidth}{\centering\small\todo{run \texttt{scripts/aggregate.py} to generate \texttt{#2}}}}}}
+
+\title{Memory, Layout Diversity and Reward Shaping in\\Partially Observable Maze Foraging:\\A Reproducible Small-Scale Study}
+\author{Bishwaswarup\thanks{OUSUMS Lab, Department of Physics, Indian Institute of Science, Bangalore, India. \texttt{bishwaswarup@iisc.ac.in}}
+% \and Co-author \thanks{...}
+}
+\date{Preprint --- \today}
+
+\begin{document}
+\maketitle
+
+% =====================================================================
+\begin{abstract}
+We study a deliberately small foraging task. An agent with a $7\times7$
+egocentric view must reach a food source in procedurally generated
+$11\times11$ perfect mazes. The task is cheap enough to train many agents
+on a laptop CPU, yet it exposes three design choices that matter widely in
+deep reinforcement learning: \emph{memory} (none, frame stacking, or an
+LSTM), \emph{training-layout diversity} (from a single maze to a fresh maze
+every episode), and \emph{reward design} (sparse, exact potential-based
+shaping, or an ad-hoc shaped reward). Every agent is trained with PPO and
+evaluated on the same set of 500 held-out layouts, and on larger mazes, with
+success rate, SPL and bootstrap confidence intervals over seeds. As
+references we include a random walk, an oracle, and a hand-coded
+right-hand wall follower. The wall follower uses one integer of memory and
+always succeeds in a perfect maze.
+\todo{One or two sentences stating the main empirical findings once the experiments are run, e.g.\ how many layouts are needed before held-out success matches training success, whether recurrence beats frame stacking, and whether learned agents beat the wall follower on SPL.}
+We do not propose a new method. Our aim is a transparent, fully
+reproducible reference point, and we release the code, configurations and
+evaluation protocol.
+\end{abstract}
+
+% =====================================================================
+\section{Introduction}
+
+Social insects forage efficiently with tiny brains and limited
+perception~\citep{wehner2003desert,bonabeau1999swarm}. This makes ant-like
+foraging a natural testbed for learning agents that must act on local,
+partial information. In deep reinforcement learning (RL), even the simplest
+version of the task, one agent looking for food in a maze, touches three
+recurring questions:
+
+\begin{enumerate}[leftmargin=*,itemsep=2pt]
+  \item \textbf{How much memory does a partially observed agent need?} Frame
+  stacking~\citep{mnih2015human} and recurrent policies~\citep{hausknecht2015drqn,ni2022recurrent}
+  are the standard choices, and they trade simplicity for capacity differently.
+  \item \textbf{How many distinct environments must an agent see to
+  generalise?} Agents trained on few procedurally generated levels tend to
+  memorise them~\citep{zhang2018overfitting,cobbe2019quantifying,cobbe2020procgen,kirk2023survey}.
+  \item \textbf{Does reward shaping help, and is it safe?} Potential-based
+  shaping provably preserves optimal policies~\citep{ng1999policy}. Ad-hoc
+  shaping terms do not, and they are common in practice.
+\end{enumerate}
+
+We study all three on one small, fully specified task. Our contributions
+are empirical and practical:
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+  \item an open, seeded Gymnasium~\citep{towers2024gymnasium} environment with
+  configurable layout pools and reward presets, plus a test suite that checks
+  maze validity, seeding and the telescoping property of the shaping term;
+  \item a fixed evaluation protocol: held-out layouts, success and SPL~\citep{anderson2018evaluation},
+  bootstrap CIs over seeds~\citep{agarwal2021precipice,henderson2018matters},
+  no checkpoint selection on evaluation data, and simple non-learned baselines;
+  \item controlled experiments on memory $\times$ layout diversity, reward
+  design, and field of view, with zero-shot transfer to larger mazes.
+\end{itemize}
+
+% =====================================================================
+\section{Related Work}
+
+\paragraph{Partial observability.} Maze navigation from local views is a
+POMDP~\citep{kaelbling1998pomdp}. Frame stacking gives a fixed-length
+history~\citep{mnih2015human}, while recurrent policies~\citep{hochreiter1997lstm,hausknecht2015drqn}
+can in principle integrate unbounded history.
+\citet{ni2022recurrent} show that well-tuned recurrent model-free RL is a
+strong POMDP baseline, and POPGym~\citep{morad2023popgym} benchmarks memory
+models across many tasks. Navigation agents in richer 3D mazes also rely on
+recurrence~\citep{mirowski2017navigate}.
+
+\paragraph{Generalisation and procedural generation.}
+\citet{zhang2018overfitting} and \citet{cobbe2019quantifying} show that
+deep RL agents overfit to small sets of training levels, and Procgen~\citep{cobbe2020procgen}
+made the number of training levels a standard axis of evaluation; see~\citet{kirk2023survey}
+for a survey. Grid-world suites such as Minigrid~\citep{chevalier2023minigrid}
+include maze tasks similar to ours. Our environment is intentionally simpler,
+so that many seeds and configurations fit on a CPU.
+
+\paragraph{Reward shaping.} Potential-based shaping $F=\gamma\Phi(s')-\Phi(s)$
+leaves the optimal policy unchanged~\citep{ng1999policy} and is equivalent to
+value initialisation~\citep{wiewiora2003potential}. In episodic tasks the
+potential of terminal states must be handled with care~\citep{grzes2017reward}.
+
+\paragraph{Ant-inspired algorithms.} Ant colony optimisation~\citep{dorigo2004aco}
+and swarm intelligence~\citep{bonabeau1999swarm} use stigmergy, coordination
+through the environment. Our single-agent study is the first step towards a
+multi-agent setting with learned pheromone use (\cref{sec:discussion}).
+
+% =====================================================================
+\section{Task and Environment}\label{sec:env}
+
+\begin{figure}[t]
+  \centering
+  \maybegraphic{width=0.85\linewidth}{figures/env.pdf}
+  \caption{\textbf{The task.} Left: an $11\times11$ perfect maze with the nest
+  (brown), food (green), the ant (red) and its $7\times7$ field of view (blue
+  tint). Right: the three observation channels the agent receives.}
+  \label{fig:env}
+\end{figure}
+
+\paragraph{Mazes.} A layout is an $11\times11$ grid whose border is wall. It
+is a \emph{perfect} maze: a spanning tree over the $5\times5$ lattice of
+odd-coordinate ``rooms'', generated by randomised depth-first search (which
+favours long corridors and is not uniform over spanning trees). Exactly one
+simple path joins any two of its $49$ free cells. A layout is a
+deterministic function of an integer seed. Training layouts come either
+from a fixed pool of $N$ seeds ($N\in\{1,8,64,512\}$) or are freshly sampled
+every episode ($N=\infty$). Held-out layouts use a disjoint seed range. The
+$5\times5$ room lattice has $557{,}568{,}000$ spanning trees. Empirically,
+OVERLAP_SENTENCE
+
+\paragraph{Episodes.} The nest and food are placed uniformly at random
+among free cells, subject to a geodesic (shortest-path) distance of at least
+3. Placements are re-sampled every episode even when the layout pool is
+fixed. The agent starts at the nest. An episode terminates when the agent
+reaches the food and is truncated after $T_{\max}=6\times49=294$ steps.
+
+\paragraph{POMDP.} The state $s=(\text{layout},p_{\text{agent}},p_{\text{nest}},p_{\text{food}})$
+is hidden. Actions are $\cA=\{\uparrow,\rightarrow,\downarrow,\leftarrow\}$,
+and a move into a wall leaves the agent in place. The observation $o\in\{0,1\}^{3\times7\times7}$
+is an egocentric window of radius $k=3$ with three channels: wall (cells
+outside the grid count as walls), food, and nest (\cref{fig:env}). The window
+covers about 40\% of the grid but rarely shows the food at the start of an
+episode, so the agent has to explore.
+
+\paragraph{Rewards.} We compare three presets.
+\emph{Sparse}: $r=\mathbb{1}[\text{food reached}]$.
+\emph{PBRS}: sparse plus $F(s,s')=\gamma\Phi(s')-\Phi(s)$ with
+\begin{equation}
+  \Phi(s) = -\,\frac{d(p_{\text{agent}},p_{\text{food}})}{D},\qquad D=\max_{c} d(c,p_{\text{food}}),
+\end{equation}
+where $d$ is the geodesic (BFS) distance in the maze. We set $\Phi\equiv0$ at
+the goal.
+\emph{Legacy}: the reward used in an earlier version of this code:
+$-0.01$ per step, $-0.1$ per wall bump, $0.15\,\Delta d_{1}$ where $d_1$ is
+the \emph{Manhattan} distance (with no $\gamma$ factor), a revisit penalty
+$-0.05\min(n_{\text{visits}}-1,5)$, and $+10$ on success.
+
+\begin{proposition}\label{prop:pbrs}
+For any trajectory $s_0,\dots,s_\tau$ that ends at the goal or by truncation,
+the discounted PBRS return equals the discounted sparse return plus
+$\gamma^{\tau}\Phi(s_\tau)-\Phi(s_0)$. $\Phi(s_0)$ is fixed by the
+episode's start state and $\Phi(s_\tau)=0$ at the goal, so
+on episodes that reach the goal the two rewards rank policies identically~\citep{ng1999policy,grzes2017reward}.
+\end{proposition}
+\begin{proof}
+$\sum_{t=0}^{\tau-1}\gamma^{t}\big(\gamma\Phi(s_{t+1})-\Phi(s_t)\big)$ telescopes
+to $\gamma^{\tau}\Phi(s_\tau)-\Phi(s_0)$.
+\end{proof}
+
+The identity is checked numerically in the test suite. The legacy reward is
+not of this form: the revisit penalty depends on history, and the Manhattan
+term ignores walls and $\gamma$. It can therefore change which policies are
+optimal.
+
+% =====================================================================
+\section{Agents and Training}\label{sec:agents}
+
+All agents share one feature extractor: two $3\times3$ convolutions (16 and 32
+channels, ReLU), adaptive average pooling to $3\times3$, and a 64-unit linear
+layer. Separate two-layer MLP heads (64 units) produce the policy and the
+value. The memory variants differ only in their input or core:
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+  \item \textbf{None}: the current observation only (a reactive policy);
+  \item \textbf{Frame stack}: the last 4 observations concatenated along channels~\citep{mnih2015human};
+  \item \textbf{LSTM}: a 64-unit LSTM~\citep{hochreiter1997lstm} after the extractor (RecurrentPPO from SB3-Contrib).
+\end{itemize}
+We train with PPO~\citep{schulman2017ppo} and GAE~\citep{schulman2016gae} in
+Stable-Baselines3~\citep{raffin2021sb3}, using one hyperparameter setting
+for every condition (\cref{tab:hparams}) and no per-condition tuning. Each run
+lasts $10^6$ environment steps.
+\todo{State whether a small pilot sweep was used to choose the shared hyperparameters; see \citet{andrychowicz2021matters}.}
+
+\begin{table}[t]
+\centering\small
+\caption{Hyperparameters, shared by all conditions (\texttt{configs/default.yaml}).}
+\label{tab:hparams}
+\begin{tabular}{@{}ll@{\hspace{2em}}ll@{}}
+\toprule
+Parallel envs & 8 & Discount $\gamma$ & 0.99 \\
+Rollout length / env & 256 & GAE $\lambda$ & 0.95 \\
+Minibatch size & 256 & Clip $\epsilon$ & 0.2 \\
+Epochs / update & 10 & Entropy coef. & 0.01 \\
+Learning rate & $3\times10^{-4}$ (Adam) & Value coef. & 0.5 \\
+Total env steps & $10^6$ & Max grad norm & 0.5 \\
+Frame stack & 4 & LSTM hidden & 64 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% =====================================================================
+\section{Evaluation Protocol}\label{sec:protocol}
+
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+  \item \textbf{Held-out set}: 500 episodes on 500 distinct unseen layouts,
+  each with a fixed nest and food placement. Every method sees exactly the
+  same episodes, so comparisons are paired.
+  \item \textbf{Training distribution}: 200 episodes on training layouts
+  with fresh placements. The difference between training and held-out success
+  is the generalisation gap.
+  \item \textbf{Size transfer}: 500 held-out episodes on $15\times15$ and $21\times21$
+  mazes with the same $7\times7$ window, made possible by adaptive pooling.
+  \item \textbf{Metrics}: success rate, and SPL $=\frac{1}{M}\sum_i S_i\,\ell_i/\max(p_i,\ell_i)$~\citep{anderson2018evaluation},
+  where $\ell_i$ is the shortest-path length and $p_i$ the agent's path length.
+  \item \textbf{Action selection}: we report both stochastic (sampling) and
+  deterministic (arg-max) policies. A deterministic reactive policy can
+  cycle forever in a maze, so the two can differ substantially.
+  \item \textbf{Statistics}: 5 seeds per condition. We report means with 95\%
+  percentile-bootstrap CIs over seeds~\citep{agarwal2021precipice}. We
+  evaluate the \emph{final} policy; held-out data is never used for checkpoint selection.
+  \item \textbf{Baselines}: a uniform random walk; a right-hand \emph{wall
+  follower} that sees only the four adjacent cells and keeps one heading
+  variable, and that provably visits every cell of a perfect maze and so
+  always succeeds; and an \emph{oracle} that follows the shortest path.
+\end{itemize}
+
+\begin{table}[t]
+\centering\small
+\caption{Non-learned baselines on the held-out episodes (500 layouts per size).
+The wall follower always succeeds, but its path is on average much longer than the shortest path.}
+\label{tab:baselines}
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+ & \multicolumn{2}{c}{$11\times11$} & \multicolumn{2}{c}{$15\times15$} & \multicolumn{2}{c}{$21\times21$} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}
+Baseline & Success & SPL & Success & SPL & Success & SPL \\
+\midrule
+Random walk   & 30.8 & 4.2 & 22.8 & 2.4 & 17.6 & 1.1 \\
+Wall follower & 100.0 & 64.9 & 100.0 & 62.1 & 100.0 & 52.0 \\
+Oracle        & 100.0 & 100.0 & 100.0 & 100.0 & 100.0 & 100.0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% =====================================================================
+\section{Results}\label{sec:results}
+
+\todo{All numbers below are generated by \texttt{scripts/aggregate.py}.
+Write the narrative only after the runs finish. Report what the data shows,
+including null or negative results.}
+
+\subsection{Memory $\times$ layout diversity}
+
+\begin{figure}[t]
+  \centering
+  \maybegraphic{width=\linewidth}{figures/main_generalisation.pdf}
+  \caption{\textbf{Generalisation gap.} Success (stochastic policy) on
+  training layouts (left) and held-out layouts (right) against the number of
+  distinct training layouts. Shaded regions: 95\% bootstrap CI over 5 seeds.
+  Dashed and dotted lines: wall follower and random walk.}
+  \label{fig:main}
+\end{figure}
+
+\begin{table}[t]
+\centering\scriptsize
+\caption{Held-out performance (\%) by memory type and number of training
+layouts ($\infty$ = fresh layout every episode). Mean [95\% CI] over 5 seeds.}
+\label{tab:main}
+\maybeinput{tables/main.tex}
+\end{table}
+
+\todo{Describe \cref{fig:main} and \cref{tab:main}. Suggested questions:
+(i) at which pool size does held-out success approach training success?
+(ii) does the ranking of memory types change with diversity?
+(iii) do deterministic and stochastic evaluation differ more for the reactive (no-memory) agent?
+(iv) how do learned agents compare with the wall follower on SPL?}
+
+\begin{figure}[t]
+  \centering
+  \maybegraphic{width=0.55\linewidth}{figures/main_curves.pdf}
+  \caption{Held-out success during training ($N=\infty$). Mean $\pm$ s.d. over seeds.}
+  \label{fig:curves}
+\end{figure}
+
+\subsection{Reward design}
+
+\begin{figure}[t]
+  \centering
+  \maybegraphic{width=\linewidth}{figures/reward.pdf}
+  \caption{Held-out success and SPL for the three reward presets with 8 and
+  $\infty$ training layouts (frame-stack agent). Legacy reward with 8 layouts
+  reproduces the training setup of the earlier code release (\cref{app:errata}).}
+  \label{fig:reward}
+\end{figure}
+
+\begin{table}[t]
+\centering\scriptsize
+\caption{Reward ablation, held-out (\%).}
+\label{tab:reward}
+\maybeinput{tables/reward.tex}
+\end{table}
+
+\todo{Describe \cref{fig:reward}: does PBRS speed learning or improve the
+final policy compared with sparse? Does the legacy reward lead to
+qualitatively different behaviour (e.g.\ fewer revisits but lower SPL)?}
+
+\subsection{Field of view}
+
+\begin{figure}[t]
+  \centering
+  \maybegraphic{width=\linewidth}{figures/window.pdf}
+  \caption{Held-out performance against window radius $k\in\{1,2,3\}$ ($3\times3$ to $7\times7$ views), $N=\infty$.}
+  \label{fig:window}
+\end{figure}
+
+\todo{Describe \cref{fig:window}. Does memory matter more as the view shrinks?}
+
+\subsection{Transfer to larger mazes}
+
+\begin{table}[t]
+\centering\small
+\caption{Held-out success (\%, stochastic) on larger mazes, zero-shot.}
+\label{tab:transfer}
+\maybeinput{tables/main_transfer.tex}
+\end{table}
+
+\todo{Describe \cref{tab:transfer}, comparing with the baselines in \cref{tab:baselines}.}
+
+% =====================================================================
+\section{Discussion and Limitations}\label{sec:discussion}
+
+\todo{Summarise the findings in 1--2 paragraphs.}
+
+\paragraph{Limitations.} The environment is small and the observation is
+symbolic. Mazes are perfect (tree-structured), which is exactly the setting
+where a wall follower is complete. Braided mazes with loops would remove
+that guarantee. We use one hyperparameter setting for all conditions, so a
+condition that would benefit from different settings (e.g.\ longer
+sequences for the LSTM) may be disadvantaged. Five seeds give wide
+intervals for some conditions. Compute was limited to CPUs.
+
+\paragraph{Towards collective foraging.} The repository contains
+prototype components for a multi-agent extension (a diffusing,
+evaporating pheromone field and inter-agent message channels), which we
+leave to future work.
+
+% =====================================================================
+\section*{Reproducibility Statement}
+Code, configurations and the evaluation protocol are available at
+\url{https://github.com/Bishwaswarup/ANTS_RL}. Each figure and table in
+\cref{sec:results} is produced by \texttt{scripts/run\_experiments.py} followed
+by \texttt{scripts/aggregate.py}, and every run stores its fully resolved
+configuration. \todo{Add the commit hash, hardware, total compute, and a
+Zenodo DOI for the run archive.}
+
+\section*{Acknowledgements}
+\todo{Acknowledgements.}
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+% =====================================================================
+\appendix
+\section{Note on an Earlier Code Release}\label{app:errata}
+
+An earlier version of this repository (v0) reported that a frame-stack PPO
+agent solved random $11\times11$ mazes, with an average return of about 9.6.
+An audit found the following:
+(i) the maze generator never reset its grid, so each environment instance
+kept a single layout for its whole lifetime. Training with 8 parallel
+environments therefore used 8 fixed layouts, and evaluation used a ninth;
+(ii) the visualisation script drew a different maze from the one the
+policy acted in;
+(iii) v0's own evaluation log on its unseen layout shows success rates of
+5--20\% and mean returns near $-90$;
+(iv) the distance-shaping term was not potential-based.
+All of these are fixed in the version described here, and v0's claims are
+withdrawn. The \emph{legacy}/8-layout condition in \cref{fig:reward} reproduces v0's
+training setup under the corrected evaluation protocol.
+
+\section{Additional Results}
+\todo{Deterministic-policy versions of the figures, wall-hit rates, and
+example trajectories (\texttt{scripts/render.py}).}
+
+\end{document}
