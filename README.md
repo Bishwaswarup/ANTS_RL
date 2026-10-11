@@ -49,7 +49,7 @@ can report what v0 *actually* learned.
 git clone https://github.com/Bishwaswarup/ANTS_RL && cd ANTS_RL
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"          # or: pip install -r requirements.txt
-pytest -q                        # 21 tests, ~30 s
+pytest -q                        # 27 tests, ~30 s
 ```
 
 ## Quickstart
@@ -83,7 +83,7 @@ results, for paired statistics).
 | Observation | `(3, 7, 7)` binary: wall / food / nest, egocentric, out-of-bounds = wall |
 | Actions | up, right, down, left. A move into a wall leaves the agent in place |
 | Episode | starts at the nest; ends on reaching the food or after 294 steps (6 × free cells) |
-| Layouts | `n_train_mazes: N` → a fixed pool of N layouts; `0` → a fresh layout every episode. Nest and food are re-sampled every episode. Held-out layouts use a disjoint seed range |
+| Layouts | `n_train_mazes: N` → a fixed pool of N layouts; `0` → a fresh layout every episode. Nest and food are re-sampled every episode. Each layout is assigned to a train or test split by a hash of the layout itself (1 in 10 is test); training never uses test layouts and held-out evaluation uses only test layouts |
 
 Reward presets (`env.reward.preset`):
 
@@ -98,12 +98,14 @@ Baselines (`ants_rl/baselines.py`): **random walk**; **wall follower**
 guaranteed to succeed in a perfect maze); **oracle** (true shortest path,
 SPL = 1).
 
-Held-out reference numbers (500 layouts, 11×11):
+Held-out reference numbers (500 test-split layouts, 11×11; regenerate with
+`python scripts/evaluate.py --baselines`, which writes `results/baselines.json`;
+the paper's table is generated from that file by `scripts/aggregate.py`):
 
 | Baseline | Success | SPL |
 |---|---|---|
-| Random walk | 30.8% | 0.042 |
-| Wall follower | 100% | 0.649 |
+| Random walk | 24.2% | 0.025 |
+| Wall follower | 100% | 0.644 |
 | Oracle | 100% | 1.000 |
 
 ---
@@ -132,6 +134,8 @@ cd paper && latexmk -pdf main.tex
 | `main` | memory {none, stack, lstm} × train layouts {1, 8, 64, 512, ∞} | 75 |
 | `reward` | reward {sparse, pbrs, legacy} × train layouts {8, ∞}, frame stack | 30 |
 | `window` | window radius {1, 2, 3} × memory {stack, lstm}, ∞ layouts | 30 |
+| `memory_size` | LSTM hidden units {1, 2, 4, 8, 64}, ∞ layouts | 25 |
+| `braid` (optional) | train on braided mazes (`env.braid=0.5`), memory {stack, lstm} | 6 (3 seeds) |
 
 **Compute.** Measured on one CPU core with 1 torch thread: PPO
 (none/stack) runs at about 1,300 env steps/s, so a 1M-step run takes about
@@ -142,6 +146,23 @@ grid across cluster jobs. For a quick pilot, add
 `--set ppo.total_timesteps=200000`.
 
 `configs/experiments/smoke.yaml` runs the whole pipeline in a couple of minutes.
+
+### Extension studies
+
+```bash
+# Loops out-of-distribution: braided mazes (env.braid = P(dead end is opened)).
+# The wall follower is only guaranteed on perfect mazes; how do learned agents cope?
+python scripts/eval_braid.py --runs "runs/main/memory=lstm__n_train_mazes=0/seed*" \
+                                    "runs/main/memory=stack__n_train_mazes=0/seed*"
+
+# Minimum memory: LSTM hidden-size sweep (the wall follower needs ~2 bits)
+python scripts/run_experiments.py configs/experiments/memory_size.yaml --jobs 6
+
+# What did the LSTM learn? Linear probes on the hidden state, with controls
+python scripts/probe_lstm.py --run "runs/main/memory=lstm__n_train_mazes=0/seed*"
+
+python scripts/analyze_extras.py     # -> paper/figures/{braid,memory_size,probe}.*, paper/tables/*.tex
+```
 
 ---
 
