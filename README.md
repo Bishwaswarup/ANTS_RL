@@ -89,8 +89,8 @@ Reward presets (`env.reward.preset`):
 
 | Preset | Definition |
 |---|---|
-| `sparse` | +1 on reaching food |
-| `pbrs` (default) | sparse + γΦ(s′) − Φ(s), with Φ(s) = −d(s)/D, where d is the BFS distance to the food and D the maximum such distance in the maze. Φ = 0 at the goal ⇒ policy-invariant (Ng et al., 1999) |
+| `sparse` | +1 on reaching food, −0.01 per step |
+| `pbrs` (default) | sparse (incl. −0.01/step) + γΦ(s′) − Φ(s), with Φ(s) = −d(s)/D, where d is the BFS distance to the food and D the maximum such distance in the maze. Φ = 0 at the goal ⇒ policy-invariant (Ng et al., 1999). The step cost c ≥ 1−γ stops PBRS from paying for standing still (the pilot agent learned to push into walls without it) |
 | `legacy` | v0 reward: −0.01/step, −0.1/wall hit, +0.15·ΔManhattan, −0.05·min(visits−1, 5), +10 on food. **Not** policy-invariant |
 
 Baselines (`ants_rl/baselines.py`): **random walk**; **wall follower**

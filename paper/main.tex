@@ -164,13 +164,19 @@ covers about 40\% of the grid but rarely shows the food at the start of an
 episode, so the agent has to explore.
 
 \paragraph{Rewards.} We compare three presets.
-\emph{Sparse}: $r=\mathbb{1}[\text{food reached}]$.
+\emph{Sparse}: $r=\mathbb{1}[\text{food reached}]-c$ with a constant step
+cost $c=0.01$.
 \emph{PBRS}: sparse plus $F(s,s')=\gamma\Phi(s')-\Phi(s)$ with
 \begin{equation}
   \Phi(s) = -\,\frac{d(p_{\text{agent}},p_{\text{food}})}{D},\qquad D=\max_{c} d(c,p_{\text{food}}),
 \end{equation}
 where $d$ is the geodesic (BFS) distance in the maze. We set $\Phi\equiv0$ at
-the goal.
+the goal. The step cost matters here. Without it, a step that leaves the agent
+in place (bumping a wall) earns $(\gamma-1)\Phi(s)=(1-\gamma)\,d/D>0$, a small
+but systematic reward for doing nothing. Choosing $c\ge(1-\gamma)$ makes every
+such step non-positive (\cref{sec:agents}). Since reaching the goal as fast as
+possible is already optimal, a constant step cost does not change the
+optimal behaviour.
 \emph{Legacy}: the reward used in an earlier version of this code:
 $-0.01$ per step, $-0.1$ per wall bump, $0.15\,\Delta d_{1}$ where $d_1$ is
 the \emph{Manhattan} distance (with no $\gamma$ factor), a revisit penalty
@@ -209,7 +215,16 @@ We train with PPO~\citep{schulman2017ppo} and GAE~\citep{schulman2016gae} in
 Stable-Baselines3~\citep{raffin2021sb3}, using one hyperparameter setting
 for every condition (\cref{tab:hparams}) and no per-condition tuning. Each run
 lasts $10^6$ environment steps.
-\todo{State whether a small pilot sweep was used to choose the shared hyperparameters; see \citet{andrychowicz2021matters}.}
+\paragraph{Pilot.} We fixed the shared settings with a single pilot before
+running any grid (frame stack, $N=\infty$, one seed, $10^6$ steps); see
+\citet{andrychowicz2021matters} on the sensitivity of on-policy methods. With
+PBRS and no step cost the deterministic policy pushed into walls on most steps
+(56\% wall hits at $10^6$ steps, 92\% at $2\times10^5$). Adding $c=0.01$ raised
+held-out SPL from 0.22 to 0.33 (stochastic) and from 0.17 to 0.31
+(deterministic), and lowered the wall-hit rate from 43\% to 28\% (stochastic).
+Both pilots were still improving at $10^6$ steps.
+\todo{Fill in the outcome of the longer pilot (training budget / $\gamma$) and
+the budget finally used.}
 
 \begin{table}[t]
 \centering\small

@@ -50,12 +50,15 @@ EVAL_SEED_BASE = 1_000_000
 PROCEDURAL_SEED_BASE = 10_000_000
 
 REWARD_PRESETS: dict[str, dict] = {
-    # +1 on reaching food, nothing else.
-    "sparse": dict(success=1.0, step_penalty=0.0, wall_penalty=0.0,
+    # +1 on reaching food, -0.01 per step.
+    "sparse": dict(success=1.0, step_penalty=0.01, wall_penalty=0.0,
                    shaping="none", shaping_weight=0.0,
                    revisit_penalty=0.0, revisit_cap=0),
     # Sparse reward + exact potential-based shaping on geodesic distance.
-    "pbrs": dict(success=1.0, step_penalty=0.0, wall_penalty=0.0,
+    # The step penalty c = 0.01 >= (1 - gamma) * shaping_weight cancels the
+    # positive shaping reward (gamma - 1) * Phi(s) >= 0 that PBRS otherwise pays
+    # for standing still / bumping a wall (pilot: 92% wall hits without it).
+    "pbrs": dict(success=1.0, step_penalty=0.01, wall_penalty=0.0,
                  shaping="pbrs_geodesic", shaping_weight=1.0,
                  revisit_penalty=0.0, revisit_cap=0),
     # Original ANTS reward (v0): not policy-invariant.
