@@ -24,8 +24,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import numpy as np  # noqa: E402
 
+from ants_rl.baselines import RandomPolicy, WallFollowerPolicy  # noqa: E402
 from ants_rl.config import load_config, load_yaml  # noqa: E402
-from ants_rl.evaluation import heldout_episodes  # noqa: E402
+from ants_rl.evaluation import evaluate_baseline, heldout_episodes, summarise  # noqa: E402
 from ants_rl.training import load_model  # noqa: E402
 from ants_rl.viz import caption, draw_frame, hstack, run_ants, save_gif, vstack  # noqa: E402
 
@@ -61,7 +62,17 @@ def curve_value(curves, step: int, col: str):
     return float(curves[col].values[i])
 
 
-def curve_image(curves, marks, width_px: int, baselines) -> np.ndarray:
+def reference_levels(cfg: dict, env_cfg: dict) -> dict:
+    """Random walk and wall follower on the *same* held-out episodes the
+    learning curve uses (eval.curve_episodes), so the levels are comparable."""
+    eps = heldout_episodes(cfg["eval"]["curve_episodes"], width=env_cfg["width"],
+                           height=env_cfg["height"], algorithm=env_cfg.get("maze_algorithm", "dfs"),
+                           braid=env_cfg.get("braid", 0.0))
+    return {name: summarise(evaluate_baseline(pol, env_cfg, eps, gamma=cfg["ppo"]["gamma"]))["success_rate"]
+            for name, pol in (("wall follower", WallFollowerPolicy()), ("random walk", RandomPolicy()))}
+
+
+def curve_image(curves, marks, width_px: int, refs: dict) -> np.ndarray:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -72,18 +83,15 @@ def curve_image(curves, marks, width_px: int, baselines) -> np.ndarray:
     if "deterministic_success" in curves:
         ax.plot(x, curves["deterministic_success"], color=ORANGE, lw=2, ls="--",
                 label="success (deterministic)")
-    if baselines:
-        for name, ls in (("wall_follower", (0, (4, 2))), ("random", ":")):
-            v = baselines.get(name, {}).get("11", {}).get("success_rate")
-            if v is not None:
-                ax.axhline(v, color=MUTED, lw=1, ls=ls)
-                ax.annotate(name.replace("_", " "), (x.max(), v), xytext=(-2, 3),
-                            textcoords="offset points", ha="right", fontsize=7, color=MUTED)
+    for (name, v), ls in zip(refs.items(), ((0, (4, 2)), ":")):
+        ax.axhline(v, color=MUTED, lw=1, ls=ls)
+        ax.annotate(f"{name} ({100 * v:.0f}%)", (x.min(), v), xytext=(4, 3),
+                    textcoords="offset points", ha="left", fontsize=7, color=MUTED)
     for k, (step, _) in enumerate(marks):
         ax.axvline(step / 1e6, color=MUTED, lw=0.8, alpha=0.6)
         ax.annotate(chr(65 + k), (step / 1e6, 1.02), ha="center", fontsize=8, color=MUTED,
                     annotation_clip=False)
-    ax.set_ylim(0, 1.0)
+    ax.set_ylim(0, 1.06)
     ax.set_xlabel("environment steps (millions)", fontsize=8, color=MUTED)
     ax.set_ylabel("held-out success", fontsize=8, color=MUTED)
     for sp in ("top", "right"):
@@ -124,8 +132,6 @@ def main():
     if (run / "curves.csv").exists():
         import pandas as pd
         curves = pd.read_csv(run / "curves.csv")
-    bpath = Path("results/baselines.json")
-    baselines = json.loads(bpath.read_text()) if bpath.exists() else None
     mode = "deterministic" if args.deterministic else "stochastic"
 
     marks = policies(run, args.max_panels)
@@ -151,11 +157,12 @@ def main():
         return hstack(panels)
 
     top0 = frame(0)
-    bottom = curve_image(curves, marks, top0.shape[1], baselines) if curves is not None else None
+    bottom = (curve_image(curves, marks, top0.shape[1], reference_levels(cfg, env_cfg))
+              if curves is not None else None)
     title = caption(np.full((1, top0.shape[1], 3), 255, dtype=np.uint8),
                     [f"{run.name}: one unseen maze, policy at different stages of training "
                      f"({mode}, {args.ants} independent ant{'s' if args.ants > 1 else ''})"],
-                    height=18)
+                    height=20)
 
     def compose(t):
         parts = [title, frame(t)] + ([bottom] if bottom is not None else [])

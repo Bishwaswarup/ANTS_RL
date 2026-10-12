@@ -77,7 +77,7 @@ above the run's learning curve. You can see the ant go from bumping into
 walls to walking to the food.
 
 ```bash
-python scripts/train.py --subproc --run-dir runs/demo          # ~25-40 min
+python scripts/train.py --run-dir runs/demo                    # ~25-30 min
 python scripts/render_progress.py --run runs/demo --gif progress.gif
 python scripts/render_progress.py --run runs/demo --ants 20 --gif swarm_progress.gif
 python scripts/render_progress.py --run runs/demo --png progress.png   # static figure
@@ -100,15 +100,17 @@ command continues where it stopped. Finished runs are skipped and paused runs
 resume from their checkpoint.
 
 ```bash
-# one run at a time, each maze in its own process, 3-hour session
+# four runs in parallel, 3-hour session
 caffeinate -i python scripts/run_experiments.py configs/experiments/main.yaml \
-    --jobs 1 --subproc --threads 2 --max-hours 3
+    --jobs 4 --max-hours 3
 # ...later, same command again to continue
 ```
 
-`--subproc` (`ppo.vec_env: subproc`) steps the 8 mazes in 8 processes. It
-helps when one run has the machine to itself (`--jobs 1`). With several runs
-in parallel (`--jobs 4`), leave it off: the runs already keep the cores busy.
+`--subproc` (`ppo.vec_env: subproc`) steps the 8 mazes in 8 processes. On an
+M1 MacBook Air it measured *slower* (1,195 vs 1,290 steps/s, 200k-step
+benchmark). Stepping this maze is so cheap that inter-process overhead
+dominates. Use `--jobs 4` (four runs in parallel, one process each) to keep
+the cores busy instead. Both settings give identical results for the same seed.
 A resumed run trains for the same number of steps but is not bit-identical
 to an uninterrupted one, because the environment random state restarts.
 

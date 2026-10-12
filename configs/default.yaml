@@ -41,7 +41,7 @@ ppo:
   max_grad_norm: 0.5
   device: cpu
   vec_env: dummy           # dummy: all mazes in one process (use with --jobs > 1)
-                           # subproc: one process per maze (faster for one run at a time)
+                           # subproc: one process per maze (measured slower on an M1 Air)
 
 eval:
   n_episodes: 500          # held-out layouts for the final evaluation
