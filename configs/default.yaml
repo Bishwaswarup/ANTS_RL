@@ -40,6 +40,8 @@ ppo:
   vf_coef: 0.5
   max_grad_norm: 0.5
   device: cpu
+  vec_env: dummy           # dummy: all mazes in one process (use with --jobs > 1)
+                           # subproc: one process per maze (faster for one run at a time)
 
 eval:
   n_episodes: 500          # held-out layouts for the final evaluation
@@ -53,3 +55,6 @@ output:
   root: runs
   save_model: true
   tensorboard: false
+  checkpoint_every: 100000 # checkpoint.zip for resuming after a stop / time limit
+  snapshots: [0, 50000, 200000, 500000, 1000000]   # policy copies for render_progress.py
+                                                   # (the final policy is model.zip)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import time
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.logger import configure
 from stable_baselines3.common.utils import set_random_seed
-from stable_baselines3.common.vec_env import DummyVecEnv, VecFrameStack
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecFrameStack
 
 from .env import AntMazeEnv
 from .evaluation import (evaluate_model, heldout_episodes, save_results, summarise,
@@ -35,9 +36,16 @@ def heldout_for(env_cfg: dict, n: int):
 
 
 def build_vec_env(cfg: dict, seed: int):
+    """``ppo.vec_env``: ``dummy`` steps all mazes in this process (best when
+    several runs share the machine, e.g. ``--jobs 4``); ``subproc`` gives each
+    maze its own process (best for one run at a time on a multi-core machine)."""
     a, p = cfg["agent"], cfg["ppo"]
+    kind = p.get("vec_env", "dummy")
+    if kind not in ("dummy", "subproc"):
+        raise ValueError(f"ppo.vec_env must be dummy or subproc, got {kind!r}")
     venv = make_vec_env(
-        AntMazeEnv, n_envs=p["n_envs"], seed=seed, vec_env_cls=DummyVecEnv,
+        AntMazeEnv, n_envs=p["n_envs"], seed=seed,
+        vec_env_cls=SubprocVecEnv if kind == "subproc" else DummyVecEnv,
         env_kwargs=dict(gamma=p["gamma"], **env_kwargs(cfg)),
     )
     if a["memory"] == "stack":
@@ -59,12 +67,17 @@ def build_model(cfg: dict, venv, seed: int, log_dir: str | None = None):
     return PPO("MlpPolicy", venv, policy_kwargs=pk, seed=seed, verbose=0, **kwargs)
 
 
-def load_model(run_dir: str | Path, cfg: dict):
-    path = Path(run_dir) / "model.zip"
+def _algo(cfg: dict):
     if cfg["agent"]["memory"] == "lstm":
         from sb3_contrib import RecurrentPPO
-        return RecurrentPPO.load(path, device="cpu")
-    return PPO.load(path, device="cpu")
+        return RecurrentPPO
+    return PPO
+
+
+def load_model(run_dir: str | Path, cfg: dict, path: str | Path | None = None, env=None):
+    """Load ``model.zip`` of a run (or any checkpoint/snapshot ``path``)."""
+    path = Path(path) if path is not None else Path(run_dir) / "model.zip"
+    return _algo(cfg).load(path, env=env, device="cpu")
 
 
 def _eval(model, cfg, env_cfg, episodes, mode):
@@ -85,6 +98,11 @@ class LearningCurveCallback(BaseCallback):
         self.next_at = 0
         self.last_eval = -1
         self.t0 = time.time()
+        if path.exists():  # resuming: continue the existing curve
+            rows = list(csv.DictReader(open(path)))
+            if rows:
+                self.last_eval = int(float(rows[-1]["timesteps"]))
+                self.next_at = self.last_eval + every
 
     def _evaluate(self):
         row = {"timesteps": self.num_timesteps, "wall_time": time.time() - self.t0}
@@ -103,7 +121,7 @@ class LearningCurveCallback(BaseCallback):
             self.next_at += self.every
 
     def _on_training_start(self):
-        if self.every > 0:
+        if self.every > 0 and self.num_timesteps != self.last_eval and self.num_timesteps >= self.next_at:
             self._evaluate()
 
     def _on_step(self) -> bool:
@@ -114,6 +132,58 @@ class LearningCurveCallback(BaseCallback):
     def _on_training_end(self):
         if self.every > 0 and self.num_timesteps != self.last_eval:
             self._evaluate()
+
+
+class SnapshotCallback(BaseCallback):
+    """Saves the policy at chosen training steps -> snapshots/step_XXXXXXXX.zip,
+    so behaviour can be replayed at different stages of learning
+    (scripts/render_progress.py)."""
+
+    def __init__(self, folder: Path, steps):
+        super().__init__()
+        self.folder = folder
+        self.todo = sorted(int(x) for x in (steps or []))
+
+    def _save(self):
+        self.folder.mkdir(parents=True, exist_ok=True)
+        self.model.save(self.folder / f"step_{self.num_timesteps:08d}.zip")
+
+    def _on_training_start(self):
+        self.todo = [s for s in self.todo if s > self.num_timesteps or s == 0 and self.num_timesteps == 0]
+        if self.todo and self.todo[0] == 0:
+            self._save()
+            self.todo.pop(0)
+
+    def _on_step(self) -> bool:
+        if self.todo and self.num_timesteps >= self.todo[0]:
+            self._save()
+            while self.todo and self.todo[0] <= self.num_timesteps:
+                self.todo.pop(0)
+        return True
+
+
+class CheckpointAndBudgetCallback(BaseCallback):
+    """Saves ``checkpoint.zip`` every ``every`` steps and stops training
+    (after saving) once ``deadline`` (a ``time.time()`` value) has passed."""
+
+    def __init__(self, path: Path, every: int, deadline: float | None):
+        super().__init__()
+        self.path, self.every, self.deadline = path, every, deadline
+        self.next_at = None
+        self.out_of_time = False
+
+    def _on_training_start(self):
+        self.next_at = self.num_timesteps + self.every if self.every > 0 else None
+
+    def _on_step(self) -> bool:
+        if self.next_at is not None and self.num_timesteps >= self.next_at:
+            self.model.save(self.path)
+            self.next_at += self.every
+        if self.deadline is not None and time.time() >= self.deadline:
+            self.model.save(self.path)
+            self.out_of_time = True
+            return False
+        return True
 
 
 def full_evaluation(model, cfg: dict) -> tuple[dict, dict]:
@@ -149,30 +219,81 @@ def save_episode_arrays(path: Path, episodes: dict) -> None:
     np.savez_compressed(path, **flat)
 
 
-def train(cfg: dict, run_dir: str | Path) -> dict:
+def _truncate_curves(path: Path, upto: int) -> None:
+    """Drop learning-curve points recorded after the checkpoint (hard kill)."""
+    if not path.exists():
+        return
+    rows = list(csv.DictReader(open(path)))
+    keep = [r for r in rows if int(float(r["timesteps"])) <= upto]
+    if len(keep) != len(rows) and rows:
+        with open(path, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=list(rows[0]))
+            w.writeheader()
+            w.writerows(keep)
+
+
+def train(cfg: dict, run_dir: str | Path, max_hours: float | None = None) -> dict | None:
+    """Train (or resume) one run, then evaluate.
+
+    If ``<run_dir>/checkpoint.zip`` exists the run resumes from it. With
+    ``max_hours`` training stops once the budget is used up, after saving a
+    checkpoint; the function then returns ``None`` and the same call later
+    continues where it stopped. A resumed run is equivalent in budget but not
+    bit-identical to an uninterrupted one (environment RNG states restart).
+    """
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
+    out = cfg["output"]
+    total = int(cfg["ppo"]["total_timesteps"])
+    ckpt = run_dir / "checkpoint.zip"
+    state_path = run_dir / "train_state.json"
+    state = json.loads(state_path.read_text()) if state_path.exists() else {"sessions": 0, "train_time_s": 0.0}
     seed = int(cfg["seed"])
-    set_random_seed(seed)
+    set_random_seed(seed + 1000 * state["sessions"])
+    venv = build_vec_env(cfg, seed + 1000 * state["sessions"])
 
-    venv = build_vec_env(cfg, seed)
-    model = build_model(cfg, venv, seed)
-    fmts = ["csv"] + (["tensorboard"] if cfg["output"].get("tensorboard") else [])
+    if ckpt.exists():
+        model = load_model(run_dir, cfg, path=ckpt, env=venv)
+        prev = run_dir / "progress.csv"
+        if prev.exists():
+            prev.rename(run_dir / f"progress_part{state['sessions']}.csv")
+        _truncate_curves(run_dir / "curves.csv", int(model.num_timesteps))
+        print(f"[train] resuming from {ckpt} at {model.num_timesteps:,} / {total:,} steps")
+    else:
+        model = build_model(cfg, venv, seed)
+    fmts = ["csv"] + (["tensorboard"] if out.get("tensorboard") else [])
     model.set_logger(configure(str(run_dir), fmts))
 
-    cb = LearningCurveCallback(cfg, run_dir / "curves.csv", cfg["eval"]["curve_every"],
-                               cfg["eval"]["curve_episodes"])
+    deadline = time.time() + 3600 * max_hours if max_hours else None
+    budget_cb = CheckpointAndBudgetCallback(ckpt, int(out.get("checkpoint_every", 0) or 0), deadline)
+    cbs = [LearningCurveCallback(cfg, run_dir / "curves.csv", cfg["eval"]["curve_every"],
+                                 cfg["eval"]["curve_episodes"]),
+           SnapshotCallback(run_dir / "snapshots", out.get("snapshots")),
+           budget_cb]
+    remaining = total - int(model.num_timesteps)
     t0 = time.time()
-    model.learn(total_timesteps=int(cfg["ppo"]["total_timesteps"]), callback=cb)
-    train_time = time.time() - t0
-    if cfg["output"].get("save_model", True):
-        model.save(run_dir / "model.zip")
+    if remaining > 0:
+        model.learn(total_timesteps=remaining, callback=cbs, reset_num_timesteps=False)
+    state["sessions"] += 1
+    state["train_time_s"] += time.time() - t0
+    state["timesteps"] = int(model.num_timesteps)
+    state_path.write_text(json.dumps(state, indent=1))
+    if budget_cb.out_of_time and model.num_timesteps < total:
+        venv.close()
+        print(f"[train] time budget reached at {model.num_timesteps:,} / {total:,} steps; "
+              f"checkpoint saved, re-run the same command to continue")
+        return None
 
+    if out.get("save_model", True):
+        model.save(run_dir / "model.zip")
     summary, episodes = full_evaluation(model, cfg)
-    summary["train_time_s"] = train_time
+    summary["train_time_s"] = state["train_time_s"]
     summary["timesteps"] = int(model.num_timesteps)
+    summary["sessions"] = state["sessions"]
     save_results(run_dir / "eval.json", summary)
     save_episode_arrays(run_dir / "episodes.npz", episodes)
+    if ckpt.exists():
+        ckpt.unlink()
     venv.close()
     return summary
