@@ -147,12 +147,16 @@ def draw_frame(ro: Rollout, t: int, cell: int = 20) -> np.ndarray:
 
 def caption(img: np.ndarray, lines: list[str], height: int = 34) -> np.ndarray:
     """Add white header rows with text above ``img``."""
-    from PIL import Image, ImageDraw
+    from PIL import Image, ImageDraw, ImageFont
+    try:
+        font = ImageFont.load_default(size=13)   # Pillow >= 10.1
+    except TypeError:
+        font = ImageFont.load_default()
     out = Image.new("RGB", (img.shape[1], img.shape[0] + height), (255, 255, 255))
     out.paste(Image.fromarray(img), (0, height))
     d = ImageDraw.Draw(out)
     for i, line in enumerate(lines):
-        d.text((4, 2 + 15 * i), line, fill=(20, 20, 20))
+        d.text((4, 2 + 15 * i), line, fill=(20, 20, 20), font=font)
     return np.asarray(out)
 
 
