@@ -10,6 +10,11 @@ Examples
     python scripts/run_experiments.py configs/experiments/main.yaml --jobs 4 \
         --set ppo.total_timesteps=200000          # quick pilot
     python scripts/run_experiments.py configs/experiments/main.yaml --shard 0/4   # cluster arrays
+
+    # one run at a time, each maze in its own process, session capped at 3 h.
+    # Re-run the same command to continue: finished runs are skipped and an
+    # interrupted run resumes from its checkpoint.
+    python scripts/run_experiments.py configs/experiments/main.yaml --subproc --max-hours 3
 """
 
 import argparse
@@ -72,17 +77,23 @@ def expand(spec: dict, extra: dict) -> list[tuple[Path, dict]]:
     return runs
 
 
-def run_one(run_dir: Path, cfg: dict, threads: int) -> tuple[Path, int, float]:
+PAUSED = 3        # train.py exit code when it stops at the time budget
+MIN_START_MIN = 5  # do not start a run with less than this many minutes left
+
+
+def run_one(run_dir: Path, cfg: dict, threads: int, deadline: float | None):
+    if deadline is not None and deadline - time.time() < 60 * MIN_START_MIN:
+        return run_dir, None, 0.0  # skipped: session budget used up
     run_dir.mkdir(parents=True, exist_ok=True)
     cfg_path = run_dir / "requested_config.yaml"
     cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False))
+    cmd = [sys.executable, str(ROOT / "scripts" / "train.py"), "--config", str(cfg_path),
+           "--run-dir", str(run_dir), "--threads", str(threads)]
+    if deadline is not None:
+        cmd += ["--max-hours", f"{(deadline - time.time()) / 3600:.4f}"]
     t0 = time.time()
-    with open(run_dir / "stdout.log", "w") as log:
-        rc = subprocess.call(
-            [sys.executable, str(ROOT / "scripts" / "train.py"), "--config", str(cfg_path),
-             "--run-dir", str(run_dir), "--threads", str(threads)],
-            stdout=log, stderr=subprocess.STDOUT, cwd=ROOT,
-        )
+    with open(run_dir / "stdout.log", "a") as log:
+        rc = subprocess.call(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT)
     return run_dir, rc, time.time() - t0
 
 
@@ -94,10 +105,16 @@ def main():
     ap.add_argument("--set", nargs="*", default=[], metavar="KEY=VALUE")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--shard", default=None, help="i/n: run only every n-th job starting at i")
+    ap.add_argument("--subproc", action="store_true",
+                    help="each maze in its own process (good with --jobs 1)")
+    ap.add_argument("--max-hours", type=float, default=None,
+                    help="session budget: running runs checkpoint and stop when it is used up, "
+                         "no new run starts; re-run the command to continue")
     args = ap.parse_args()
 
     spec = yaml.safe_load(open(args.spec))
-    runs = expand(spec, parse_overrides(args.set))
+    extra = parse_overrides(args.set + (["ppo.vec_env=subproc"] if args.subproc else []))
+    runs = expand(spec, extra)
     if args.shard:
         i, n = map(int, args.shard.split("/"))
         runs = runs[i::n]
@@ -110,15 +127,30 @@ def main():
             print("  ", d)
         return
 
-    failed = []
+    deadline = time.time() + 3600 * args.max_hours if args.max_hours else None
+    failed, paused, skipped, done = [], 0, 0, 0
     with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        futs = [pool.submit(run_one, d, c, args.threads) for d, c in todo]
-        for k, f in enumerate(as_completed(futs), 1):
+        futs = [pool.submit(run_one, d, c, args.threads, deadline) for d, c in todo]
+        for f in as_completed(futs):
             d, rc, dt = f.result()
-            status = "ok" if rc == 0 else f"FAILED (rc={rc}, see {d / 'stdout.log'})"
-            print(f"  [{k}/{len(todo)}] {d}  {dt / 60:.1f} min  {status}", flush=True)
-            if rc != 0:
+            if rc is None:
+                skipped += 1
+                continue
+            if rc == 0:
+                done += 1
+                status = "ok"
+            elif rc == PAUSED:
+                paused += 1
+                status = "paused (time budget), will resume next session"
+            else:
                 failed.append(d)
+                status = f"FAILED (rc={rc}, see {d / 'stdout.log'})"
+            print(f"  {d}  {dt / 60:.1f} min  {status}", flush=True)
+    left = len(todo) - done - len(failed)
+    print(f"[{spec['name']}] this session: {done} finished, {paused} paused, "
+          f"{len(failed)} failed; {left} still to do")
+    if left:
+        print("  re-run the same command to continue")
     if failed:
         sys.exit(1)
 
