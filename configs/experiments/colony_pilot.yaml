@@ -1,0 +1,29 @@
+# Focused Phase-2 signal check: does shared pheromone help a small colony,
+# and does topology change its value? 2 topologies x 2 trail settings x 3 seeds.
+seeds: [0, 1, 2]
+torch_threads: 1
+grid:
+  width: [11]
+  n_ants: [4]
+  braid: [0.0, 0.5]
+  pheromones: [false, true]
+env:
+  obs_window: 3
+  episode_steps: 600
+  maze_algorithm: dfs
+  evaporation: 0.02
+  diffusion: 0.08
+  deposit: 1.0
+  max_pheromone: 8.0
+  shaping: true
+  gamma: 0.99
+  step_penalty: 0.01
+n_envs: 4
+total_timesteps: 500000
+n_steps: 256
+batch_size: 256
+n_epochs: 10
+learning_rate: 0.0003
+gamma: 0.99
+ent_coef: 0.01
+eval_episodes: 100

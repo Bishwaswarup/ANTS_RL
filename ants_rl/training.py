@@ -259,6 +259,10 @@ def train(cfg: dict, run_dir: str | Path, max_hours: float | None = None) -> dic
         if prev.exists():
             prev.rename(run_dir / f"progress_part{state['sessions']}.csv")
         _truncate_curves(run_dir / "curves.csv", int(model.num_timesteps))
+        # Record every resume immediately, so a run that was hard-killed
+        # (Ctrl-C, sleep, Kaggle timeout) is still marked as resumed.
+        state.setdefault("resumed_at", []).append(int(model.num_timesteps))
+        state_path.write_text(json.dumps(state, indent=1))
         print(f"[train] resuming from {ckpt} at {model.num_timesteps:,} / {total:,} steps")
     else:
         model = build_model(cfg, venv, seed)
@@ -291,6 +295,7 @@ def train(cfg: dict, run_dir: str | Path, max_hours: float | None = None) -> dic
     summary["train_time_s"] = state["train_time_s"]
     summary["timesteps"] = int(model.num_timesteps)
     summary["sessions"] = state["sessions"]
+    summary["resumed_at"] = state.get("resumed_at", [])  # empty = uninterrupted, bit-reproducible run
     save_results(run_dir / "eval.json", summary)
     save_episode_arrays(run_dir / "episodes.npz", episodes)
     if ckpt.exists():

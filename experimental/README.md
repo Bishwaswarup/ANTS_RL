@@ -11,4 +11,8 @@ part of the Phase-1 study or its test suite:
 | `reward_shaping.py` | Composable reward shapers (superseded by `ants_rl/env.py` presets) |
 | `message_probe.py` | Linear probes for analysing learned messages |
 
+The runnable colony PPO pilot is now in [`colony/`](colony/README.md) with
+its own integrated environment (`ants_rl.colony`) and config. The original
+modules listed above remain prototypes and are not dependencies of that pilot.
+
 Imports still refer to the old package layout and will need updating before use.
