@@ -254,5 +254,5 @@ experimental/      untested Phase-2 prototypes (pheromones, comms)
 }
 ```
 
-**Author:** Bishwaswarup, OUSUMS Lab, Department of Physics, Indian Institute
+**Author:** Bishwaswarup, Department of Physics, Indian Institute
 of Science, Bangalore. Licensed under MIT.
