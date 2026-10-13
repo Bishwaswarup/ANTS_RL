@@ -238,8 +238,8 @@ def fig_curves(runs_dir: Path, out_stem: Path, pool=0, mode="stochastic"):
         any_curve = True
         df = pd.concat(curves, axis=1).sort_index().interpolate(limit_area="inside")
         x = df.index.values / 1e6
-        m = df.mean(1).values
-        sd = df.std(1).fillna(0).values
+        m = df.mean(axis=1).values
+        sd = df.std(axis=1).fillna(0).values
         ax.fill_between(x, m - sd, m + sd, color=st["color"], alpha=0.15, lw=0)
         ax.plot(x, m, color=st["color"], lw=2, label=st["label"])
     if not any_curve:

@@ -241,6 +241,14 @@ experimental/      untested Phase-2 prototypes (pheromones, comms)
 - [ ] Run the experiment grids and fill in the preprint
 - [ ] Phase 2: multi-ant foraging with pheromone fields (`experimental/`)
 
+### Colony pilot add-on
+
+An optional, integrated colony study is available in
+[`experimental/colony/`](experimental/colony/). It adds a shared-pheromone
+Gymnasium environment and PPO runner that reuse the project's seeded maze
+generator. It does not change the Phase-1 environment or its results. See the
+colony README for the pilot command, assumptions, and limitations.
+
 ## Citation
 
 ```bibtex
