@@ -102,7 +102,8 @@ class ColonyMazeEnv(gym.Env):
                 self.path_lengths[a] += 1
             if self.pheromones:
                 channel = 1 if self.carrying[a] else 0
-                self.trails[channel, *self.positions[a]] += self.deposit
+                px, py = self.positions[a]  # (star-unpacking in a subscript needs Python 3.11+)
+                self.trails[channel, px, py] += self.deposit
             if not self.carrying[a] and self.positions[a] == self.food:
                 self.carrying[a] = True
             elif self.carrying[a] and self.positions[a] == self.nest:
