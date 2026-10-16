@@ -5,6 +5,7 @@
 [![Gymnasium](https://img.shields.io/badge/Gymnasium-0.29+-black)](https://gymnasium.farama.org)
 [![SB3](https://img.shields.io/badge/SB3-2.3+-blue)](https://stable-baselines3.readthedocs.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-22c55e)](LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23414928.svg)](https://doi.org/10.5281/zenodo.23414928)
 
 <p align="center">
   <img src="docs/media/swarm_progress.gif" width="100%"
