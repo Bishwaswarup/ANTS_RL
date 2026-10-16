@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Aggregate finished runs into CSVs, LaTeX tables and paper figures.
 
-    python scripts/aggregate.py                 # every experiment under runs/
+    python scripts/aggregate.py                 # the paper's experiments (main, reward, window)
     python scripts/aggregate.py --exp main reward
 
 Outputs
@@ -323,7 +323,9 @@ def main():
     plt.rcParams.update({"font.family": "serif", "pdf.fonttype": 42, "axes.labelcolor": MUTED})
 
     runs_root = Path(args.runs)
-    exps = args.exp or (sorted(p.name for p in runs_root.iterdir() if p.is_dir())
+    # By default only the paper's experiments (those with a recipe); pilots,
+    # smoke tests and single runs are aggregated only when named via --exp.
+    exps = args.exp or ([e for e in RECIPES if (runs_root / e).is_dir()]
                         if runs_root.exists() else [])
     bpath = Path(args.results) / "baselines.json"
     baselines = json.loads(bpath.read_text()) if bpath.exists() else None
