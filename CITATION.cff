@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "ANTS-RL: Memory, Layout Diversity and Reward Shaping in Partially Observable Maze Foraging"
+type: software
+authors:
+  - given-names: Bishwaswarup
+    affiliation: "Department of Physics, Indian Institute of Science, Bangalore, India"
+    email: bishwaswarup@iisc.ac.in
+repository-code: "https://github.com/Bishwaswarup/ANTS_RL"
+license: MIT
+version: 0.2.0
+keywords:
+  - reinforcement learning
+  - PPO
+  - partial observability
+  - procedural generation
+  - generalisation
+  - reward shaping
+  - swarm intelligence
