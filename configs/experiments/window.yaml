@@ -1,9 +1,11 @@
-# E3 - Field of view. 3 window radii x 2 memory types x 5 seeds = 30 runs.
+# E3 - Field of view: window radius 1, 2, 3 (3x3, 5x5, 7x7 view), frame stack,
+# fresh maze every episode. 3 radii x 5 seeds = 15 runs (~3 h with --jobs 4).
+# Radius 3 repeats the main-grid setting; uninterrupted runs reproduce it exactly.
 name: window
 seeds: [0, 1, 2, 3, 4]
 fixed:
   env.reward.preset: pbrs
   env.n_train_mazes: 0
+  agent.memory: stack
 grid:
   env.obs_window: [1, 2, 3]
-  agent.memory: [stack, lstm]

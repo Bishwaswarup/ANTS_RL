@@ -1,9 +1,18 @@
 # ANTS-RL: Partially Observable Maze Foraging with PPO
 
+[![tests](https://github.com/Bishwaswarup/ANTS_RL/actions/workflows/tests.yml/badge.svg)](https://github.com/Bishwaswarup/ANTS_RL/actions/workflows/tests.yml)
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](https://python.org)
 [![Gymnasium](https://img.shields.io/badge/Gymnasium-0.29+-black)](https://gymnasium.farama.org)
 [![SB3](https://img.shields.io/badge/SB3-2.3+-blue)](https://stable-baselines3.readthedocs.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-22c55e)](LICENSE)
+
+<p align="center">
+  <img src="docs/media/swarm_progress.gif" width="100%"
+       alt="The same unseen maze solved by one policy at six stages of training, 20 independent ants per panel, above the learning curve">
+  <br><em>One unseen maze, 20 independent copies of the policy at six stages of
+  training (0 to 2M steps). Early ants wander and pile up against walls; by
+  2M steps they stream from the nest (brown) to the food (green).</em>
+</p>
 
 A small, fully reproducible deep-RL testbed: an "ant" with a 7×7 egocentric
 view must find food in procedurally generated mazes. The repository
@@ -19,6 +28,43 @@ questions:
 Every method, learned or hand-coded, is evaluated on the **same fixed set of
 held-out maze layouts**. Results are reported as success rate and SPL (success
 weighted by path length) with 95% bootstrap confidence intervals over seeds.
+
+---
+
+## Results
+
+PPO, 2M environment steps per run, 5 seeds (LSTM: 3). Success is measured on
+**500 unseen maze layouts** (stochastic policy). For reference, a random walk
+succeeds 24% of the time and the hand-coded right-hand wall follower 100%
+(SPL 0.64).
+
+<p align="center"><img src="docs/media/main_generalisation.png" width="90%"
+  alt="Success on training and unseen mazes against the number of distinct training mazes, for no memory, frame stack and LSTM"></p>
+
+| Training mazes | No memory: training mazes | No memory: unseen | Frame stack: training mazes | Frame stack: unseen |
+|---|---|---|---|---|
+| 1 | 79% | 23% | 100% | 27% |
+| 8 | 57% | 33% | 96% | 57% |
+| 64 | 42% | 33% | 77% | 66% |
+| 512 | 39% | 35% | 74% | 70% |
+| ∞ (new maze every episode) | 44% | 35% | 78% | **72%** |
+
+- **Memorisation vs. navigation.** Trained on one maze, the frame-stack agent
+  solves it every time but is no better than a random walk on new mazes.
+  With 64 or more training mazes the gap between seen and unseen mazes nearly closes.
+- **Memory matters.** Without memory, success on unseen mazes stays near 35%
+  whatever the training variety. Four stacked frames reach 72%. An LSTM given
+  the same budget reaches 62% (∞) and 59% (8 mazes).
+- **Reward design matters.** With a fresh maze every episode, exact
+  potential-based shaping reaches 75%, against 55% for a sparse reward with step
+  cost. The original v0 reward (ad-hoc wall, revisit and Manhattan terms) reaches
+  only 31%, and 4% with the deterministic policy.
+- **Still far from systematic exploration.** The best learned path efficiency
+  (SPL 0.40) is below the wall follower's 0.64, and success drops to about 30%
+  on unseen 21×21 mazes.
+
+Full tables with 95% bootstrap confidence intervals: `paper/tables/`,
+`results/*/summary.csv`. Regenerate everything with `python scripts/aggregate.py`.
 
 ---
 
@@ -64,8 +110,11 @@ python scripts/train.py --set agent.memory=lstm env.n_train_mazes=64 seed=2
 # hand-coded baselines on the same held-out mazes
 python scripts/evaluate.py --baselines
 
-# watch a trained agent (GIF, or --live with pygame)
+# watch the trained agent (GIF, or --live with pygame)
 python scripts/render.py --run runs/single/stack4_mazes0_pbrs_w3/seed0 --gif ant.gif --episodes 3
+# (train.py without --run-dir writes to runs/single/<config>/seed<k>;
+#  grid runs live in runs/<experiment>/<setting>/seed<k>, e.g.
+#  runs/main/memory=stack__n_train_mazes=0/seed0)
 ```
 
 ## Watching the ant learn
@@ -165,8 +214,8 @@ python scripts/run_experiments.py configs/experiments/main.yaml --dry-run
 # 2. run (resumable: finished runs are skipped)
 python scripts/run_experiments.py configs/experiments/main.yaml   --jobs 4
 python scripts/run_experiments.py configs/experiments/main_lstm.yaml --jobs 4
-python scripts/run_experiments.py configs/experiments/reward.yaml --jobs 6
-python scripts/run_experiments.py configs/experiments/window.yaml --jobs 6
+python scripts/run_experiments.py configs/experiments/reward.yaml --jobs 4
+python scripts/run_experiments.py configs/experiments/window.yaml --jobs 4
 python scripts/evaluate.py --baselines
 
 # 3. tables -> paper/tables/, figures -> paper/figures/, CSVs -> results/
@@ -181,7 +230,7 @@ cd paper && latexmk -pdf main.tex
 | `main` | memory {none, stack} × train layouts {1, 8, 64, 512, ∞} | 50 |
 | `main_lstm` | LSTM × train layouts {8, ∞} (3 seeds; same output folder as `main`) | 6 |
 | `reward` | reward {sparse, pbrs, legacy} × train layouts {8, ∞}, frame stack | 30 |
-| `window` | window radius {1, 2, 3} × memory {stack, lstm}, ∞ layouts | 30 |
+| `window` | window radius {1, 2, 3} (3×3 to 7×7 view), frame stack, ∞ layouts | 15 |
 | `memory_size` | LSTM hidden units {1, 2, 4, 8, 64}, ∞ layouts | 25 |
 | `braid` (optional) | train on braided mazes (`env.braid=0.5`), memory {stack, lstm} | 6 (3 seeds) |
 
@@ -232,14 +281,18 @@ scripts/           train, evaluate, run_experiments, aggregate, render, render_p
 configs/           default.yaml + experiments/*.yaml
 tests/             maze validity, seeding, observation, PBRS telescoping, pipeline
 paper/             LaTeX preprint (tables/figures generated by aggregate.py)
+docs/media/        README images and animations
+.github/workflows/ CI: runs the test suite on every push
 experimental/      untested Phase-2 prototypes (pheromones, comms)
 ```
 
 ## Roadmap
 
 - [x] v0.2: bug fixes, reproducible pipeline, held-out evaluation, baselines
-- [ ] Run the experiment grids and fill in the preprint
-- [ ] Phase 2: multi-ant foraging with pheromone fields (`experimental/`)
+- [x] Main grid (memory × training mazes, 80 runs) and reward ablation (30 runs)
+- [ ] Field-of-view experiment (`window.yaml`, 15 runs)
+- [ ] Preprint draft and `v0.2.0` release with a Zenodo DOI
+- [ ] Phase 2: multi-ant foraging with shared pheromone trails (`experimental/colony/`, pilot does not learn yet)
 
 ### Colony pilot add-on
 
@@ -250,6 +303,8 @@ generator. It does not change the Phase-1 environment or its results. See the
 colony README for the pilot command, assumptions, and limitations.
 
 ## Citation
+
+GitHub's "Cite this repository" button uses [`CITATION.cff`](CITATION.cff).
 
 ```bibtex
 @misc{bishwaswarup2026antsrl,
